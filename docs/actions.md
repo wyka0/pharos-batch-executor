@@ -19,7 +19,8 @@ invalid-address, duplicate-ID and malformed-calldata inputs fail before signing.
 The plan boundary revalidates typed inputs and recomputes ID hashes.
 
 The on-chain ID is `keccak256(UTF-8(trimmed id))`. The contract independently
-enforces count/ID/target/calldata/value/gas bounds before any target call.
+enforces deployer-only caller authority and count/ID/target/calldata/value/gas
+bounds before any target call.
 Calldata-bearing targets must have code; plain EOA/native transfers require
 empty calldata. The executor itself cannot be an action target.
 
@@ -32,21 +33,48 @@ empty calldata. The executor itself cannot be an action target.
 - Other target calls only when their actual ABI and sender/independence semantics
   are reviewed. Four valid selector bytes alone do not prove semantic validity.
 
+The immediate deployer is the write-once `authorizedCaller`; use one executor per
+wallet. That caller can issue separately reviewed independent token operations:
+`transfer` spends **executor-held** tokens, `transferFrom` consumes an existing
+allowance to the executor, and `approve` creates an allowance **from the executor**.
+The contract blocks strangers from doing these, but trusts the authorized caller.
+It does not create funding/allowances automatically or verify ERC20 return values.
+No such setup is authorized by a request to validate or simulate a batch.
+
 ## Unsupported
 
 Targets see **the executor**, not the wallet, as `msg.sender`. There is no
-delegatecall, smart-account impersonation, EIP-7702 delegation or transferFrom
-approval machinery. The executor never signs for a wallet.
+delegatecall, smart-account impersonation, EIP-7702 delegation or automatic
+approval machinery. The executor never signs for a wallet, and a forwarder or
+relayer is not the authorized caller merely because the wallet initiated it.
 
 Do not use wallet-owned ERC20 `transfer`, sender-specific claims, claim-then-swap,
 approve-then-transfer, swaps consuming prior outputs, or other dependent actions.
-Never grant allowances to the executor to try to enable these workflows.
-Native direct transfers are supported; this is not a generic token airdrop tool.
+Do not use allowances to disguise a dependent workflow as independent, grant
+blanket allowances, or assume an executor controlled by another wallet is safe.
+Native direct transfers are supported; arbitrary wallet-owned token airdrops
+are not automatically enabled by this executor.
 
 Independence is an explicit user assertion, not a theorem the validator can prove
 for arbitrary bytecode. Likewise, CALL success is not a business postcondition:
 an ERC20-like function returning `false` without reverting is recorded as a
 successful low-level call. Receipts do not carry individual-call return data;
 batch return/revert data comes from executor events.
+
+## Coupled gas limits
+
+The 3–32 action count and 25,000–1,000,000 per-call gas bounds are syntax limits,
+not promises of execution. The combined contract reservation is
+`60,000 + sum(gasLimit + ceil(gasLimit / 63) + 60,000)`. Transaction intrinsic and
+calldata gas, decoding/authorization/validation and other overhead come on top.
+`minimumBatchTransactionGas` is only a necessary lower bound; the adapter and
+approval gate reject approved gas below it. Fresh simulation/estimation and the
+current block gas limit still apply.
+
+For example, 32 default 100,000-gas actions reserve **5,230,816** execution gas,
+already above the runner's unchanged **5,000,000** transaction ceiling. Five
+1,000,000-gas calls also exceed it even though each action is individually valid.
+Smaller caps may fit, but no accepted count/cap combination guarantees success.
+Reject infeasible plans for review; never silently split actions or raise limits.
 
 See [failure semantics](failures.md) for gas bounds, returndata and value credits.

@@ -2,6 +2,7 @@ import { keccak256, parseTransaction, recoverTransactionAddress, type Address, t
 import type { EvmPublicClient } from '../adapters/evm.js';
 import { EvmAdapter } from '../adapters/evm.js';
 import { loadArtifact, type ContractArtifact } from '../artifacts.js';
+import { assertAuthorizedCaller } from '../caller.js';
 import { ExecutionGateError } from '../errors.js';
 import { ATLANTIC } from '../network.js';
 import type { ReceiptLike } from '../receipt.js';
@@ -23,7 +24,7 @@ export interface RunnerClient extends RunnerReadClient {
 
 export interface ExecutionStep {
   id: string; index: number;
-  state: 'NOT_SUBMITTED' | 'INTENT' | 'SUBMITTED' | 'CONFIRMED' | 'REVERTED' | 'UNKNOWN' | 'UNVERIFIED';
+  state: 'NOT_SUBMITTED' | 'INTENT' | 'SUBMITTED' | 'CONFIRMED' | 'REVERTED' | 'UNKNOWN' | 'UNVERIFIED' | 'ABORTED_BEFORE_SEND';
   transactionHash?: Hash;
   receipt?: ActualReceipt;
   rawReceipt?: ReceiptLike;
@@ -69,10 +70,11 @@ export async function executeApprovedPlan(
     steps: plan.transactions.map((tx, index) => ({ id: tx.id, index, state: 'NOT_SUBMITTED',
       ...(plan.actions === undefined ? {} : { actions: planActions(plan, index) }) })),
     disclosures: [
-      'Hashes in INTENT/UNKNOWN are computed offline; they are not claims of successful broadcast or deployment.',
+      'Hashes in INTENT/UNKNOWN/ABORTED_BEFORE_SEND are computed offline; they are not claims of successful broadcast or deployment.',
       'CONFIRMED means transaction/receipt/canonical block and applicable runtime/action events were verified.',
       'A confirmed batch receipt can contain failed actions. Inspect every action, not only receipt status.',
       'Unknown or unverified submissions are never retried; remaining transactions stay NOT_SUBMITTED.',
+      'ABORTED_BEFORE_SEND means the final approval guard refused before the RPC call; durable sender/nonce intents remain and cannot be reused automatically.',
       'Simulation is a prediction, not an execution guarantee. Observed action results may differ and are reported explicitly.',
     ],
     ...(planComparison(plan) === undefined ? {} : { comparison: planComparison(plan) }),
@@ -81,6 +83,7 @@ export async function executeApprovedPlan(
   let interrupted = false;
   try {
     await persist();
+    verifyApproval(plan, approvalHash, confirmed, now());
     const signer = await deps.signerLoader();
     for (const [index, tx] of plan.transactions.entries()) {
       const step = evidence.steps[index]!;
@@ -92,6 +95,7 @@ export async function executeApprovedPlan(
         await beforeStep(plan, index, deps.client);
         await freshEstimate(plan, tx, deps.client);
         if (plan.purpose === 'batch') await assertSimulation(plan, deps.client, artifacts.BatchExecutor);
+        verifyApproval(plan, approvalHash, confirmed, now());
         const raw = await signer.sign({
           chainId: 688689, type: 'legacy', nonce: tx.nonce,
           ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: decimal(tx.valueWei),
@@ -108,6 +112,16 @@ export async function executeApprovedPlan(
         await deps.journal.append({ at: new Date(now()).toISOString(), planHash: hash, index, id: tx.id,
           state: 'INTENT', transactionHash, nonce: tx.nonce });
         await persist();
+        // No await between this final guard and the submission invocation.
+        // An aborted intent is retained: it never permits a retry/new-plan bypass.
+        try { verifyApproval(plan, approvalHash, confirmed, now()); }
+        catch {
+          step.state = 'ABORTED_BEFORE_SEND';
+          step.error = 'Approval expired or failed at the final send boundary. No RPC submission attempted; durable intent retained. Do not retry.';
+          await recordState(step, tx, hash, deps, now);
+          interrupted = true;
+          break;
+        }
         // The serialized payload remains in memory only. Exactly ONE call;
         // transport is configured with retryCount: 0 by the CLI.
         let returnedHash: Hash;
@@ -156,9 +170,9 @@ export async function executeApprovedPlan(
         // If INTENT/SUBMITTED was reached, a potentially sent transaction must
         // remain UNKNOWN, never be reclassified as safe-to-send.
         if (step.state === 'INTENT' || step.state === 'SUBMITTED') step.state = 'UNKNOWN';
-        step.error = step.state === 'UNKNOWN' ? 'Execution interrupted after intent; manual reconciliation required.' : step.state === 'CONFIRMED' || step.state === 'REVERTED' || step.state === 'UNVERIFIED'
+        step.error = step.state === 'ABORTED_BEFORE_SEND' ? 'Submission aborted before the RPC call; abort persistence failed. Preserve durable intent; do not retry.' : step.state === 'UNKNOWN' ? 'Execution interrupted after intent; manual reconciliation required.' : step.state === 'CONFIRMED' || step.state === 'REVERTED' || step.state === 'UNVERIFIED'
           ? 'Execution halted after receipt collection because evidence persistence failed. Preserve the existing hash and reconcile.'
-          : 'Pre-submission safety, signing, or persistence check failed; no transaction attempted for this step.';
+          : 'Approval, pre-submission safety, signing, or persistence check failed; no transaction attempted for this step.';
         interrupted = true;
         break;
       }
@@ -168,7 +182,7 @@ export async function executeApprovedPlan(
       if (step.state === 'NOT_SUBMITTED') step.error ??= 'Not submitted; execution halted before this transaction.';
       if (step.state !== 'CONFIRMED' && step.actions !== undefined) {
         step.actions = step.actions.map((a) => ({ ...a, success: null,
-          status: step.state === 'NOT_SUBMITTED' ? 'not_submitted' : step.state === 'REVERTED' ? 'not_committed' : 'unknown',
+          status: step.state === 'NOT_SUBMITTED' || step.state === 'ABORTED_BEFORE_SEND' ? 'not_submitted' : step.state === 'REVERTED' ? 'not_committed' : 'unknown',
           transactionHash: step.transactionHash, error: step.error ?? 'Outcome is unverified.' }));
       }
     }
@@ -180,7 +194,7 @@ export async function executeApprovedPlan(
     evidence.state = 'HALTED';
     evidence.finishedAt = new Date(now()).toISOString();
     for (const step of evidence.steps) {
-      if (step.state === 'NOT_SUBMITTED') step.error = 'Signing configuration or evidence persistence refused; this transaction was not submitted.';
+      if (step.state === 'NOT_SUBMITTED') step.error = 'Approval, signing configuration or evidence persistence refused; this transaction was not submitted.';
       if (step.state === 'INTENT' || step.state === 'SUBMITTED') {
         step.state = 'UNKNOWN'; step.error = 'Interrupted after intent; reconcile the existing hash, never resend.';
       }
@@ -241,6 +255,7 @@ async function beforeStep(plan: BroadcastPlan, index: number, client: RunnerRead
   if (plan.batchExecutor !== undefined && keccak256((await client.getCode({ address: plan.batchExecutor })) ?? '0x') !== plan.executorRuntimeCodeHash) {
     throw new ExecutionGateError('Executor code changed since approval.');
   }
+  if (plan.batchExecutor !== undefined) await assertAuthorizedCaller(client, plan.batchExecutor, plan.sender);
 }
 
 async function recordState(step: ExecutionStep, tx: PlannedTransaction, hash: string, deps: RunnerDependencies, now: () => number) {

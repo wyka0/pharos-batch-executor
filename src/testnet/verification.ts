@@ -1,5 +1,6 @@
 import { keccak256, type Hash } from 'viem';
 import type { EvmPublicClient } from '../adapters/evm.js';
+import { assertAuthorizedCaller } from '../caller.js';
 import { ExecutionGateError } from '../errors.js';
 import { ATLANTIC } from '../network.js';
 import { resultsFromReceipt, verifyReceipt, verifyTransaction, type ReceiptLike } from '../receipt.js';
@@ -18,6 +19,8 @@ export async function verifyPlannedReceipt(
   const block = await client.getBlock({ blockNumber: raw.blockNumber });
   if (block.hash === null) throw new ExecutionGateError('Missing canonical block hash.');
   const receipt = verifyReceipt(raw, hash, { currentBlockNumber: await client.getBlockNumber(), canonicalBlockHash: block.hash,
+    ...(block.parentHash === undefined ? {} : { canonicalBlockParentHash: block.parentHash }),
+    ...(block.transactions === undefined ? {} : { canonicalBlockTransactionCount: block.transactions.length }),
     minimumConfirmations: 2n, explorerBaseUrl: ATLANTIC.explorerUrl });
   if (receipt.gasUsed > decimal(tx.gasLimit) || receipt.effectiveGasPrice !== decimal(plan.gasPriceWei)) {
     throw new ExecutionGateError('Receipt gas usage or legacy gas price violates the approved limits.');
@@ -33,11 +36,13 @@ export async function verifyPlannedEffects(
     if (raw.contractAddress?.toLowerCase() !== tx.expectedContractAddress?.toLowerCase()) throw new ExecutionGateError('Deployment receipt address mismatch.');
     const code = await client.getCode({ address: raw.contractAddress!, blockNumber: receipt.blockNumber });
     if (code === undefined || code === '0x' || keccak256(code) !== tx.expectedRuntimeCodeHash) throw new ExecutionGateError('Deployed runtime bytecode mismatch.');
+    if (tx.artifactName === 'BatchExecutor') await assertAuthorizedCaller(client, raw.contractAddress!, plan.sender, receipt.blockNumber);
     return { deployedAddress: raw.contractAddress! };
   }
   if (tx.kind === 'batch') {
     const code = await client.getCode({ address: plan.batchExecutor!, blockNumber: receipt.blockNumber });
     if (code === undefined || code === '0x' || keccak256(code) !== plan.executorRuntimeCodeHash) throw new ExecutionGateError('Executor code at the receipt block does not verify.');
+    await assertAuthorizedCaller(client, plan.batchExecutor!, plan.sender, receipt.blockNumber);
     if (raw.logs === undefined) throw new ExecutionGateError('Missing batch logs.');
     return resultsFromReceipt(validateActions(plan.actions), raw.logs, plan.batchExecutor!, plan.sender, {
       transactionHash: receipt.txHash, blockHash: receipt.blockHash, blockNumber: receipt.blockNumber,

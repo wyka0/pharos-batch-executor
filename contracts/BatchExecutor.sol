@@ -2,11 +2,13 @@
 pragma solidity 0.8.24;
 
 /// @title BatchExecutor
-/// @notice Bounded, permissionless CALL batches. A failed subcall does not
+/// @notice Bounded, deployer-authorized CALL batches. A failed subcall does not
 ///         abort subsequent actions; all actions belong to ONE transaction.
 /// @dev Targets see this contract as msg.sender, NOT the submitting wallet.
-///      No delegatecall, approvals, admin, proxy, arbitrary balance spending,
-///      or retry machinery. Successful low-level CALL != business success
+///      No delegatecall, owner changes, upgrades, arbitrary native balance
+///      spending, or retries. The deployer is trusted to authorize target calls,
+///      including token calls; strangers cannot use this as an approval proxy.
+///      Successful low-level CALL != business success
 ///      (for example, an ERC20 may return false without reverting).
 contract BatchExecutor {
     struct Action {
@@ -36,8 +38,12 @@ contract BatchExecutor {
     uint256 public constant FINISH_RESERVE_GAS = 60_000;
 
     mapping(address => uint256) public refundCredits;
+    // Write-once storage keeps runtime bytecode identical across deployments.
+    // No setter, delegatecall or upgrade path can change this caller.
+    address public authorizedCaller;
     uint256 private locked = 1;
 
+    error UnauthorizedCaller();
     error InvalidCount(uint256 count);
     error InvalidId(uint256 index);
     error DuplicateId(uint256 index);
@@ -63,6 +69,15 @@ contract BatchExecutor {
     event RefundCredited(address indexed sender, uint256 amount);
     event RefundWithdrawn(address indexed sender, address indexed recipient, uint256 amount);
 
+    constructor() {
+        authorizedCaller = msg.sender;
+    }
+
+    modifier onlyAuthorizedCaller() {
+        if (msg.sender != authorizedCaller) revert UnauthorizedCaller();
+        _;
+    }
+
     modifier nonReentrant() {
         if (locked != 1) revert ReentrantCall();
         locked = 2;
@@ -70,7 +85,7 @@ contract BatchExecutor {
         locked = 1;
     }
 
-    /// @notice Execute 3..32 caller-declared independent actions. Validation
+    /// @notice Only the deployer executes 3..32 caller-declared independent actions. Validation
     ///         and gas reservation happen BEFORE any target is called.
     ///         Every subcall has its own gas cap and result event.
     /// @dev Value for failed calls is credited to the caller. A separate
@@ -80,6 +95,7 @@ contract BatchExecutor {
         external
         payable
         nonReentrant
+        onlyAuthorizedCaller
         returns (Result[] memory results)
     {
         uint256 length = actions.length;

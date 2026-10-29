@@ -1,20 +1,21 @@
 import { decodeFunctionResult, keccak256, type Address, type Hash, type Hex, type Log } from 'viem';
 
 import { BATCH_EXECUTOR_ABI } from '../abi.js';
+import { assertAuthorizedCaller } from '../caller.js';
+import { createComparisonBinding } from '../comparison.js';
 import { BatchPlanError, ExecutionGateError } from '../errors.js';
-import { calldataGas, INTRINSIC_TX_GAS } from '../gas-model.js';
-import { requiredExecutionGas } from '../limits.js';
+import { minimumBatchTransactionGas } from '../limits.js';
 import { ATLANTIC, assertEndpoint } from '../network.js';
 import { preparePlan } from '../plan.js';
 import { resultsFromReceipt, verifyActionEvents, verifyReceipt, verifyTransaction, type ReceiptLike, type TransactionLike } from '../receipt.js';
-import type { ActionResult, BatchExecutionResult, IndividualExecutionResult, ValidatedAction } from '../types.js';
+import type { ActionResult, BatchExecutionResult, ComparisonBinding, IndividualExecutionResult, ValidatedAction } from '../types.js';
 import type { BatchGasEstimates, ChainAdapter } from './types.js';
 
 export interface CallRequest { account: Address; to: Address; data: Hex; value: bigint; gas?: bigint; blockNumber?: bigint }
 export interface EvmPublicClient {
   getChainId(): Promise<number>;
   getBlockNumber(): Promise<bigint>;
-  getBlock(args: { blockNumber: bigint }): Promise<{ hash: Hash | null; gasLimit: bigint }>;
+  getBlock(args: { blockNumber: bigint }): Promise<{ hash: Hash | null; gasLimit: bigint; stateRoot?: Hash; parentHash?: Hash; transactions?: readonly unknown[] }>;
   getBalance(args: { address: Address; blockNumber?: bigint }): Promise<bigint>;
   getCode(args: { address: Address; blockNumber?: bigint }): Promise<Hex | undefined>;
   estimateGas(args: Omit<CallRequest, 'to'> & { to?: Address }): Promise<bigint>;
@@ -62,6 +63,7 @@ export class EvmAdapter implements ChainAdapter {
     if (code === undefined || code === '0x' || keccak256(code) !== this.options.expectedExecutorCodeHash) {
       throw new ExecutionGateError('Executor runtime bytecode mismatch or missing deployment.');
     }
+    await assertAuthorizedCaller(this.options.publicClient, this.options.batchExecutor, this.options.account);
   }
 
   async estimateGas(actions: readonly ValidatedAction[]): Promise<BatchGasEstimates> {
@@ -135,7 +137,9 @@ export class EvmAdapter implements ChainAdapter {
     }
     const gas = this.options.approvedGasLimit ?? (estimate * 12_000n + 9_999n) / 10_000n;
     if (gas < estimate) throw new ExecutionGateError('Current gas estimate exceeds approved transaction gas limit.');
+    if (gas < minimumBatchTransactionGas(plan.actions, plan.batchCalldata)) throw new ExecutionGateError('Transaction gas bound is below batch execution reservation plus intrinsic/calldata gas.');
     await this.checkFundsAndBlockGas(gas, plan.totalValue);
+    const comparisonBinding = await this.captureComparisonBinding(plan.actions);
     const request = { to: this.options.batchExecutor, data: plan.batchCalldata, value: plan.totalValue, gas };
     const submission = await submitSafely(this.options.submitter, request);
     if (submission.state !== 'submitted' || submission.hash === undefined) {
@@ -147,26 +151,30 @@ export class EvmAdapter implements ChainAdapter {
       };
     }
     let rawReceipt: (ReceiptLike & { logs: readonly Log[] }) | undefined;
-    let receipt: Awaited<ReturnType<EvmAdapter['checkedReceipt']>> | undefined;
+    let receipt: BatchExecutionResult['receipt'];
+    let transaction: TransactionLike | undefined;
     try {
       rawReceipt = await this.options.publicClient.waitForTransactionReceipt({
         hash: submission.hash, confirmations: this.chainId === 31337 ? 1 : 2, timeout: 180_000, pollingInterval: 3_000,
       });
-      receipt = await this.checkedReceipt(submission.hash, rawReceipt, request, submission.nonce);
+      ({ receipt, transaction } = await this.checkedReceipt(submission.hash, rawReceipt, request, submission.nonce));
       if (receipt.status === 'reverted') return {
-        kind: 'batch', state: 'reverted', transactionHash: submission.hash, receipt, rawReceipt,
+        kind: 'batch', state: 'reverted', transactionHash: submission.hash, receipt, rawReceipt, transaction, comparisonBinding,
         actions: unavailable(actions, 'not_committed', 'Outer transaction reverted: no action effects committed; intermediate execution order is not provable from this receipt.'),
         refundCreditWei: 0n,
       };
+      const code = await this.options.publicClient.getCode({ address: this.options.batchExecutor, blockNumber: receipt.blockNumber });
+      if (code === undefined || keccak256(code) !== this.options.expectedExecutorCodeHash) throw new ExecutionGateError('Executor runtime at the receipt block does not verify.');
+      await assertAuthorizedCaller(this.options.publicClient, this.options.batchExecutor, this.options.account, receipt.blockNumber);
       const result = resultsFromReceipt(actions, rawReceipt.logs, this.options.batchExecutor, this.options.account, {
         transactionHash: receipt.txHash, blockHash: receipt.blockHash, blockNumber: receipt.blockNumber,
       });
-      return { kind: 'batch', state: 'confirmed', transactionHash: submission.hash, receipt, rawReceipt, ...result };
+      return { kind: 'batch', state: 'confirmed', transactionHash: submission.hash, receipt, rawReceipt, transaction, comparisonBinding, ...result };
     } catch {
       const state = rawReceipt === undefined ? 'unknown' : 'unverified';
       const error = 'Receipt missing or verification failed. Preserve this hash and reconcile; never resubmit blindly.';
       return {
-        kind: 'batch', state, transactionHash: submission.hash, rawReceipt, receipt,
+        kind: 'batch', state, transactionHash: submission.hash, rawReceipt, receipt, transaction, comparisonBinding,
         actions: unavailable(actions, 'unknown', error), error, refundCreditWei: 0n,
       };
     }
@@ -177,7 +185,8 @@ export class EvmAdapter implements ChainAdapter {
     if (this.options.submitter === undefined) throw new ExecutionGateError('Individual execution requires an explicit broadcast capability.');
     await this.assertNetwork();
     preparePlan(actions);
-    const result: IndividualExecutionResult = { kind: 'individual', receipts: [], actions: [], rawReceipts: [] };
+    const result: IndividualExecutionResult = { kind: 'individual', receipts: [], actions: [], rawReceipts: [], transactions: [],
+      comparisonBinding: await this.captureComparisonBinding(actions) };
     for (const [index, action] of actions.entries()) {
       let gas: bigint;
       try {
@@ -198,7 +207,8 @@ export class EvmAdapter implements ChainAdapter {
       try {
         const raw = await this.options.publicClient.waitForTransactionReceipt({ hash: submission.hash });
         result.rawReceipts!.push(raw);
-        const receipt = await this.checkedReceipt(submission.hash, raw, request, submission.nonce);
+        const { receipt, transaction } = await this.checkedReceipt(submission.hash, raw, request, submission.nonce);
+        result.transactions!.push(transaction);
         result.receipts.push(receipt);
         result.actions.push({
           index, id: action.id, target: action.target, transactionHash: submission.hash, success: receipt.status === 'success',
@@ -218,10 +228,21 @@ export class EvmAdapter implements ChainAdapter {
   private batchCall(plan: ReturnType<typeof preparePlan>, blockNumber?: bigint): CallRequest {
     return {
       account: this.options.account, to: this.options.batchExecutor, data: plan.batchCalldata,
-      value: plan.totalValue, gas: requiredExecutionGas(plan.actions) + INTRINSIC_TX_GAS +
-        calldataGas(Uint8Array.from(Buffer.from(plan.batchCalldata.slice(2), 'hex'))) + 200_000n,
+      value: plan.totalValue, gas: minimumBatchTransactionGas(plan.actions, plan.batchCalldata) + 200_000n,
       ...(blockNumber === undefined ? {} : { blockNumber }),
     };
+  }
+
+  private async captureComparisonBinding(actions: readonly ValidatedAction[]): Promise<ComparisonBinding | undefined> {
+    const number = await this.options.publicClient.getBlockNumber();
+    const block = await this.options.publicClient.getBlock({ blockNumber: number });
+    if (block.hash === null || block.stateRoot === undefined) return undefined;
+    const code = await this.options.publicClient.getCode({ address: this.options.batchExecutor, blockNumber: number });
+    if (code === undefined || keccak256(code) !== this.options.expectedExecutorCodeHash) throw new ExecutionGateError('Executor runtime at the starting block does not verify.');
+    await assertAuthorizedCaller(this.options.publicClient, this.options.batchExecutor, this.options.account, number);
+    return createComparisonBinding(actions, { environment: this.environment, chainId: this.chainId,
+      sender: this.options.account, executor: this.options.batchExecutor, executorRuntimeCodeHash: this.options.expectedExecutorCodeHash,
+      startingBlock: { number, hash: block.hash, stateRoot: block.stateRoot } });
   }
 
   private async checkFundsAndBlockGas(gas: bigint, value: bigint): Promise<void> {
@@ -234,16 +255,20 @@ export class EvmAdapter implements ChainAdapter {
 
   private async checkedReceipt(hash: Hash, raw: ReceiptLike, request: SubmitRequest, nonce?: number) {
     const client = this.options.publicClient;
+    if (await client.getChainId() !== this.chainId) throw new ExecutionGateError('Receipt RPC chain ID mismatch.');
     const tx = await client.getTransaction({ hash });
     verifyTransaction(tx, { hash, from: this.options.account, to: request.to, data: request.data, value: request.value, chainId: this.chainId, nonce });
     if (raw.blockNumber === undefined) throw new BatchPlanError('Missing receipt block.');
     const canonical = await client.getBlock({ blockNumber: raw.blockNumber });
     if (canonical.hash === null) throw new BatchPlanError('Unmined canonical block.');
-    return verifyReceipt(raw, hash, {
+    const receipt = verifyReceipt(raw, hash, {
       currentBlockNumber: await client.getBlockNumber(), canonicalBlockHash: canonical.hash,
+      ...(canonical.parentHash === undefined ? {} : { canonicalBlockParentHash: canonical.parentHash }),
+      ...(canonical.transactions === undefined ? {} : { canonicalBlockTransactionCount: canonical.transactions.length }),
       minimumConfirmations: this.chainId === 31337 ? 1n : 2n,
       ...(this.chainId === ATLANTIC.chainId ? { explorerBaseUrl: ATLANTIC.explorerUrl } : {}),
     });
+    return { receipt, transaction: tx };
   }
 }
 

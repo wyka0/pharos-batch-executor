@@ -1,4 +1,17 @@
+import type { TransactionLike } from './receipt.js';
+
 export type Hex = `0x${string}`;
+
+/** Capture-time RPC observation, not a trustless state proof. */
+export interface ComparisonBinding {
+  actionPlanHash: string;
+  environment: 'local-evm' | 'atlantic-testnet';
+  chainId: number;
+  sender: Hex;
+  executor: Hex;
+  executorRuntimeCodeHash: Hex;
+  startingBlock: { number: bigint; hash: Hex; stateRoot: Hex };
+}
 
 /** User input: independence must be declared, never inferred from calldata. */
 export interface BatchActionInput {
@@ -37,6 +50,10 @@ export interface ActualReceipt {
   gasUsed: bigint;
   blockNumber: bigint;
   blockHash: Hex;
+  /** Canonical receipt block's parent, when captured by the RPC verifier. */
+  parentBlockHash?: Hex;
+  /** Canonical block count binds mining order across baseline block boundaries. */
+  blockTransactionCount?: number;
   effectiveGasPrice: bigint;
   feeWei: bigint;
   confirmations: bigint;
@@ -79,6 +96,8 @@ export interface BatchExecutionResult {
   /** Failed value is a credit, not an automatic refund transaction. */
   refundCreditWei: bigint;
   rawReceipt?: unknown;
+  transaction?: TransactionLike;
+  comparisonBinding?: ComparisonBinding;
 }
 
 export interface IndividualExecutionResult {
@@ -86,6 +105,8 @@ export interface IndividualExecutionResult {
   receipts: ReceiptInfo[];
   actions: ActionResult[];
   rawReceipts?: unknown[];
+  transactions?: TransactionLike[];
+  comparisonBinding?: ComparisonBinding;
   error?: string;
 }
 
@@ -103,6 +124,7 @@ export interface ExecutionComparison {
   transactionReduction: { count: number; fraction: number };
   baselineMethod: string;
   limitations: string[];
+  baselineValidation?: { status: 'accepted' | 'rejected'; error?: string };
 }
 
 export interface BatchRunEvidence {

@@ -1,3 +1,5 @@
+import { calldataGas, INTRINSIC_TX_GAS } from './gas-model.js';
+
 export const MIN_ACTIONS = 3;
 export const MAX_ACTIONS = 32;
 export const MIN_CALL_GAS = 25_000n;
@@ -15,4 +17,10 @@ export function requiredExecutionGas(actions: readonly { gasLimit: bigint }[]): 
     (sum, action) => sum + action.gasLimit + (action.gasLimit + 62n) / 63n + ACTION_RESERVE_GAS,
     0n,
   );
+}
+
+/** Necessary lower bound only: validation/dispatch and network overhead remain. */
+export function minimumBatchTransactionGas(actions: readonly { gasLimit: bigint }[], calldata: `0x${string}`): bigint {
+  return requiredExecutionGas(actions) + INTRINSIC_TX_GAS +
+    calldataGas(Uint8Array.from(Buffer.from(calldata.slice(2), 'hex')));
 }

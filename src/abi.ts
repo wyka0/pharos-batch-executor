@@ -1,6 +1,7 @@
 import { parseAbi } from 'viem';
 
 export const BATCH_EXECUTOR_ABI = parseAbi([
+  'function authorizedCaller() view returns (address)',
   'function execute((bytes32 id,address target,uint256 value,uint256 gasLimit,bytes data)[] actions) payable returns ((bool success,bytes data,uint256 returnDataSize)[] results)',
   'function refundCredits(address sender) view returns (uint256)',
   'function withdrawRefund(address recipient)',
@@ -9,6 +10,7 @@ export const BATCH_EXECUTOR_ABI = parseAbi([
   'event RefundCredited(address indexed sender,uint256 amount)',
   'event RefundWithdrawn(address indexed sender,address indexed recipient,uint256 amount)',
   'error InvalidCount(uint256 count)',
+  'error UnauthorizedCaller()',
   'error InvalidId(uint256 index)',
   'error DuplicateId(uint256 index)',
   'error InvalidTarget(uint256 index)',

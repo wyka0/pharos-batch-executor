@@ -7,6 +7,7 @@ import { validateActions } from '../src/validation.js';
 import { batchPlan, deployPlan } from './broadcast-fixtures.js';
 import { ACCOUNT } from './fixtures.js';
 import { actionLog, BLOCK_HASH, HASH, rawReceipt, summaryLog } from './receipt-fixtures.js';
+import { CALLER_GETTER_DATA, callerReply } from './caller-fixtures.js';
 
 function context(plan: BroadcastPlan = deployPlan(), changes: Partial<ReconcileClient> = {}) {
   const entry: JournalEntry = { at: new Date().toISOString(), planHash: broadcastPlanHash(plan), index: 0,
@@ -18,7 +19,10 @@ function context(plan: BroadcastPlan = deployPlan(), changes: Partial<ReconcileC
     getBalance: vi.fn(async () => 1n), getGasPrice: vi.fn(async () => 10_000_000_000n),
     getTransactionCount: vi.fn(async () => 1), getCode: vi.fn(async () => '0x00' as const),
     estimateGas: vi.fn(async () => { throw new Error('Reconciliation must not estimate/send'); }),
-    call: vi.fn(async () => { throw new Error('Reconciliation must not replay eth_call'); }),
+    call: vi.fn(async (request) => {
+      expect(request).toEqual({ account: plan.sender, to: plan.batchExecutor ?? tx.expectedContractAddress, data: CALLER_GETTER_DATA, value: 0n, blockNumber: 9n });
+      return callerReply(plan.sender); // only the ownership getter; no execute replay
+    }),
     waitForTransactionReceipt: vi.fn(async () => { throw new Error('Reconciliation must not wait or poll'); }),
     getTransaction: vi.fn(async () => ({ hash: HASH, from: ACCOUNT, to: tx.to, input: tx.data, value: BigInt(tx.valueWei), chainId: 688689, nonce: tx.nonce })),
     getTransactionReceipt: vi.fn(async () => ({ ...rawReceipt(), contractAddress: tx.expectedContractAddress ?? null })),
@@ -33,7 +37,7 @@ describe('read-only reconciliation', () => {
     const result = await reconcilePlan(c.plan, [c.entry], c.client);
     expect(result.steps.map((s) => s.state)).toEqual(['CONFIRMED', 'NOT_SUBMITTED']);
     expect(result.steps[0]?.receipt?.gasUsed).toBe(120_000n);
-    expect(c.client.call).not.toHaveBeenCalled();
+    expect(c.client.call).toHaveBeenCalledTimes(1); // receipt-block ownership getter only
     expect(c.client.estimateGas).not.toHaveBeenCalled();
     expect(c.client.waitForTransactionReceipt).not.toHaveBeenCalled();
   });
@@ -77,7 +81,7 @@ describe('read-only reconciliation', () => {
     expect(result.allTransactionsConfirmed).toBe(true);
     expect(result.steps[0]?.actions?.map((a) => a.success)).toEqual([true, false, true]);
     expect(result.comparison?.measuredSavings).toBeUndefined();
-    expect(c.client.call).not.toHaveBeenCalled();
+    expect(c.client.call).toHaveBeenCalledTimes(1); // receipt-block ownership getter, never execute
   });
 
   it('outer revert marks all batch actions not committed', async () => {
@@ -95,6 +99,66 @@ describe('read-only reconciliation', () => {
     expect(result.steps[0]?.state).toBe('UNVERIFIED');
     expect(result.steps[0]?.receipt?.gasUsed).toBe(120_000n);
     expect(result.steps[0]?.actions?.every((a) => a.success === null)).toBe(true);
+  });
+
+  it.each(['deployment', 'batch'] as const)('a %s receipt with a wrong authorized caller remains unverified', async (kind) => {
+    const plan = kind === 'batch' ? batchPlan() : deployPlan();
+    const c = context(plan, { call: vi.fn(async () => callerReply('0x1111111111111111111111111111111111111111')) });
+    const result = await reconcilePlan(plan, [c.entry], c.client);
+    expect(result.steps[0]?.state).toBe('UNVERIFIED');
+    expect(result.steps[0]?.receipt?.gasUsed).toBe(120_000n);
+    expect(result.steps[0]?.actions?.every((a) => a.success === null) ?? true).toBe(true);
+  });
+
+  it('preserves a locally aborted hash as not submitted without freeing its intent', async () => {
+    const plan = batchPlan();
+    const c = context(plan, { getTransactionReceipt: vi.fn(async () => null),
+      getTransaction: vi.fn(async () => { throw new TransactionNotFoundError({ hash: HASH }); }), getTransactionCount: vi.fn(async () => 0) });
+    const entries: JournalEntry[] = [c.entry, { ...c.entry, state: 'ABORTED_BEFORE_SEND' }];
+    const before = structuredClone(entries);
+    const result = await reconcilePlan(plan, entries, c.client);
+    expect(result.steps[0]?.state).toBe('ABORTED_BEFORE_SEND');
+    expect(result.steps[0]?.transactionHash).toBe(HASH);
+    expect(result.steps[0]?.actions?.every((a) => a.status === 'not_submitted' && a.success === null)).toBe(true);
+    expect(result.steps[0]?.error).toContain('Durable intent retained');
+    expect(result.allTransactionsConfirmed).toBe(false);
+    expect(result.unresolvedHashes).toBe(false);
+    expect(result.comparison?.batch.measuredGas).toBeUndefined();
+    expect(entries).toEqual(before);
+    expect(c.client.call).not.toHaveBeenCalled();
+  });
+
+  it.each(['receipt', 'pending transaction'] as const)('a visible %s conflicts with a pre-send abort and cannot be called confirmed', async (visible) => {
+    const c = context(batchPlan(), visible === 'pending transaction' ? { getTransactionReceipt: vi.fn(async () => null) } : {});
+    const result = await reconcilePlan(c.plan, [c.entry, { ...c.entry, state: 'ABORTED_BEFORE_SEND' }], c.client);
+    expect(result.steps[0]?.state).toBe('UNVERIFIED');
+    expect(result.steps[0]?.error).toContain('conflict');
+    expect(result.unresolvedHashes).toBe(true);
+    expect(result.allTransactionsConfirmed).toBe(false);
+    expect(result.comparison?.measuredSavings).toBeUndefined();
+  });
+
+  it.each(['latest', 'pending'] as const)('an advanced %s nonce keeps an aborted hash unresolved when it is not found', async (advanced) => {
+    const c = context(batchPlan(), { getTransactionReceipt: vi.fn(async () => null),
+      getTransaction: vi.fn(async () => { throw new TransactionNotFoundError({ hash: HASH }); }),
+      getTransactionCount: vi.fn(async ({ blockTag }) => blockTag === advanced ? 1 : 0) });
+    const result = await reconcilePlan(c.plan, [c.entry, { ...c.entry, state: 'ABORTED_BEFORE_SEND' }], c.client);
+    expect(result.steps[0]?.state).toBe('UNKNOWN');
+    expect(result.unresolvedHashes).toBe(true);
+  });
+
+  it('does not trust abort status when receipt RPC lookup fails', async () => {
+    const c = context(batchPlan(), { getTransactionReceipt: vi.fn(async () => { throw new Error('fixture untrusted RPC failure'); }) });
+    const result = await reconcilePlan(c.plan, [c.entry, { ...c.entry, state: 'ABORTED_BEFORE_SEND' }], c.client);
+    expect(result.steps[0]?.state).toBe('UNKNOWN');
+    expect(result.steps[0]?.error).not.toContain('untrusted');
+  });
+
+  it('rejects abort-after-submission or submission-after-abort journal sequences before RPC lookups', async () => {
+    const c = context();
+    await expect(reconcilePlan(c.plan, [c.entry, { ...c.entry, state: 'SUBMITTED' }, { ...c.entry, state: 'ABORTED_BEFORE_SEND' }], c.client)).rejects.toThrow(/sequence is inconsistent/);
+    await expect(reconcilePlan(c.plan, [c.entry, { ...c.entry, state: 'ABORTED_BEFORE_SEND' }, { ...c.entry, state: 'SUBMITTED' }], c.client)).rejects.toThrow(/sequence is inconsistent/);
+    expect(c.client.getTransactionReceipt).not.toHaveBeenCalled();
   });
 
   it('no recorded intent produces no receipt queries or invented hashes', async () => {

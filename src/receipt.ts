@@ -19,6 +19,8 @@ export interface ReceiptLike {
 export interface ReceiptChecks {
   currentBlockNumber: bigint;
   canonicalBlockHash: Hash;
+  canonicalBlockParentHash?: Hash;
+  canonicalBlockTransactionCount?: number;
   minimumConfirmations?: bigint;
   explorerBaseUrl?: string;
 }
@@ -32,6 +34,9 @@ export function verifyReceipt(receipt: ReceiptLike, expectedHash: Hash, checks: 
   if (typeof receipt.blockNumber !== 'bigint' || receipt.blockNumber <= 0n) fail('receipt has missing or invalid blockNumber');
   if (!/^0x[0-9a-fA-F]{64}$/.test(receipt.blockHash ?? '') || !/^0x[0-9a-fA-F]{64}$/.test(checks.canonicalBlockHash)) fail('receipt has invalid block hash');
   if (receipt.blockHash?.toLowerCase() !== checks.canonicalBlockHash.toLowerCase()) fail('receipt block is not canonical');
+  if (checks.canonicalBlockParentHash !== undefined && !/^0x[0-9a-fA-F]{64}$/.test(checks.canonicalBlockParentHash)) fail('invalid canonical parent block hash');
+  if (checks.canonicalBlockTransactionCount !== undefined &&
+    (!Number.isSafeInteger(checks.canonicalBlockTransactionCount) || checks.canonicalBlockTransactionCount < 1)) fail('invalid canonical block transaction count');
   if (typeof receipt.effectiveGasPrice !== 'bigint' || receipt.effectiveGasPrice < 0n) fail('receipt has missing or invalid effectiveGasPrice');
   if (typeof checks.currentBlockNumber !== 'bigint' || (checks.minimumConfirmations ?? 1n) < 1n) fail('invalid confirmation checks');
   const confirmations = checks.currentBlockNumber - receipt.blockNumber! + 1n;
@@ -40,6 +45,8 @@ export function verifyReceipt(receipt: ReceiptLike, expectedHash: Hash, checks: 
     evidence: 'actual', txHash: expectedHash, status: receipt.status!, gasUsed: receipt.gasUsed!,
     blockNumber: receipt.blockNumber!, blockHash: receipt.blockHash!, effectiveGasPrice: receipt.effectiveGasPrice!,
     feeWei: receipt.gasUsed! * receipt.effectiveGasPrice!, confirmations,
+    ...(checks.canonicalBlockParentHash === undefined ? {} : { parentBlockHash: checks.canonicalBlockParentHash }),
+    ...(checks.canonicalBlockTransactionCount === undefined ? {} : { blockTransactionCount: checks.canonicalBlockTransactionCount }),
     ...(checks.explorerBaseUrl === undefined ? {} : { explorerUrl: `${checks.explorerBaseUrl.replace(/\/$/, '')}/tx/${expectedHash}` }),
   };
 }
@@ -52,6 +59,9 @@ export interface TransactionLike {
   value: bigint;
   chainId?: number;
   nonce: number;
+  blockNumber?: bigint | null;
+  blockHash?: Hash | null;
+  transactionIndex?: number | null;
 }
 
 export function verifyTransaction(

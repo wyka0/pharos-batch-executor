@@ -47,7 +47,7 @@ export async function runBatch(
     estimates,
     batch,
     ...(options.individualResult === undefined ? {} : { individual: options.individualResult }),
-    comparison: buildComparison(actions.length, estimates, batch, options.individualResult, options.baselineMethod),
+    comparison: buildComparison(actions, estimates, batch, options.individualResult, options.baselineMethod),
     measurementDisclosures: {
       estimatesAreModelValues: adapter.environment === 'simulated',
       measuredGasFromRealReceipts: batch.receipt?.evidence === 'actual',

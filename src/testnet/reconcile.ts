@@ -5,7 +5,7 @@ import { verifyTransaction, type ReceiptLike } from '../receipt.js';
 import type { ActionResult, ActualReceipt, ExecutionComparison } from '../types.js';
 import { broadcastPlanHash, validateHistoricalPlan, type BroadcastPlan } from './broadcast-plan.js';
 import { planComparison } from './comparison.js';
-import type { JournalEntry } from './journal.js';
+import { validateJournalSequence, type JournalEntry } from './journal.js';
 import type { RunnerReadClient } from './runner.js';
 import { planActions, verifyPlannedEffects, verifyPlannedReceipt } from './verification.js';
 
@@ -15,7 +15,7 @@ export interface ReconcileClient extends RunnerReadClient {
 
 export interface ReconciliationStep {
   index: number; id: string;
-  state: 'CONFIRMED' | 'REVERTED' | 'UNVERIFIED' | 'PENDING' | 'UNKNOWN' | 'NOT_SUBMITTED';
+  state: 'CONFIRMED' | 'REVERTED' | 'UNVERIFIED' | 'PENDING' | 'UNKNOWN' | 'NOT_SUBMITTED' | 'ABORTED_BEFORE_SEND';
   transactionHash?: Hash; receipt?: ActualReceipt; rawReceipt?: ReceiptLike;
   actions?: ActionResult[]; refundCreditWei?: bigint; deployedAddress?: `0x${string}`;
   error?: string;
@@ -51,6 +51,7 @@ export async function reconcilePlan(
       continue;
     }
     step.transactionHash = transactionHash;
+    const aborted = entries.filter((entry) => entry.index === index).at(-1)?.state === 'ABORTED_BEFORE_SEND';
     let raw: (ReceiptLike & { logs: readonly Log[] }) | null;
     try { raw = await client.getTransactionReceipt({ hash: transactionHash }); }
     catch (error) {
@@ -63,6 +64,11 @@ export async function reconcilePlan(
     }
     if (raw !== null) {
       step.rawReceipt = raw;
+      if (aborted) {
+        step.state = 'UNVERIFIED'; step.error = 'RPC reports a receipt for a locally aborted hash. Journal/RPC conflict requires investigation, not execution or retry.';
+        markUnknown(step);
+        continue;
+      }
       try {
         step.receipt = await verifyPlannedReceipt(plan, tx, transactionHash, raw, client);
         if (step.receipt.status === 'reverted') {
@@ -82,9 +88,16 @@ export async function reconcilePlan(
       const observed = await client.getTransaction({ hash: transactionHash });
       verifyTransaction(observed, { hash: transactionHash, from: plan.sender,
         ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: BigInt(tx.valueWei), chainId: 688689, nonce: tx.nonce });
-      step.state = 'PENDING';
-      step.error = 'Matching transaction is visible but no verified receipt is available. Pending/mining outcome unresolved; do not resend.';
+      step.state = aborted ? 'UNVERIFIED' : 'PENDING';
+      step.error = aborted ? 'A locally aborted hash is visible as a transaction. Journal/RPC conflict requires investigation; do not retry.'
+        : 'Matching transaction is visible but no verified receipt is available. Pending/mining outcome unresolved; do not resend.';
     } catch (error) {
+      if (aborted && error instanceof TransactionNotFoundError && latestNonce <= tx.nonce && pendingNonce <= tx.nonce) {
+        step.state = 'ABORTED_BEFORE_SEND';
+        step.error = 'Local journal records a final-boundary abort before the RPC call. Durable intent retained; absence is not approval to reuse the nonce or retry.';
+        markUnknown(step, 'not_submitted');
+        continue;
+      }
       step.state = 'UNKNOWN';
       step.error = error instanceof TransactionNotFoundError && latestNonce > tx.nonce
         ? 'This nonce is consumed, but the approved hash is not located. A replacement or RPC inconsistency is possible; no outcome or retry safety is assumed.'
@@ -102,6 +115,7 @@ export async function reconcilePlan(
       'READ ONLY: no signing key was loaded, no transaction was sent, no lock was removed, and the execution journal was not changed.',
       'Expired approval plans can be inspected, but expiration is never bypassed for execution.',
       'INTENT hashes are offline-computed. A missing RPC result is not proof that the transaction was never accepted.',
+      'ABORTED_BEFORE_SEND is a local pre-send record, not permission to clear an intent. A visible hash or advanced nonce conflicts with an unsent abort and remains unresolved.',
       'Verification is an RPC-backed observation at this time, not an independent cryptographic light-client proof.',
       'A batch transaction can be confirmed with failed subcalls. Action results are taken from receipt-bound executor events, never replayed eth_call results.',
     ],
@@ -109,15 +123,12 @@ export async function reconcilePlan(
 }
 
 function journalHashes(plan: BroadcastPlan, entries: readonly JournalEntry[], hash: string): Map<number, Hash> {
+  validateJournalSequence(entries, hash);
   const result = new Map<number, Hash>();
   for (const entry of entries) {
     const tx = plan.transactions[entry.index];
     if (entry.planHash !== hash || tx === undefined || entry.id !== tx.id || entry.nonce !== tx.nonce || !/^0x[0-9a-fA-F]{64}$/.test(entry.transactionHash)) {
       throw new ExecutionGateError('Journal entry does not match this approved transaction plan.');
-    }
-    const previous = result.get(entry.index);
-    if ((previous === undefined && entry.state !== 'INTENT') || (previous !== undefined && (entry.state === 'INTENT' || previous !== entry.transactionHash))) {
-      throw new ExecutionGateError('Journal intent/hash sequence is inconsistent; manual investigation required.');
     }
     result.set(entry.index, entry.transactionHash);
   }

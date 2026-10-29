@@ -13,6 +13,7 @@ import type { UnsignedTestnetTransaction } from '../src/testnet/signer.js';
 import { batchPlan, deployPlan } from './broadcast-fixtures.js';
 import { actionLog, BLOCK_HASH, rawReceipt, summaryLog } from './receipt-fixtures.js';
 import { testTempDirectory } from './temp.js';
+import { CALLER_GETTER_DATA, callerReply } from './caller-fixtures.js';
 
 const directories: string[] = [];
 afterEach(async () => { for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }); });
@@ -30,7 +31,7 @@ async function context(changes: Partial<RunnerClient> = {}, purpose: 'deploy' | 
     getBlock: vi.fn(async () => ({ hash: BLOCK_HASH, gasLimit: 30_000_000n })),
     getBalance: vi.fn(async () => 1_000_000_000_000_000_000n), getGasPrice: vi.fn(async () => 10_000_000_000n),
     getTransactionCount: vi.fn(async () => nonce), getCode: vi.fn(async () => '0x00' as const),
-    estimateGas: vi.fn(async () => 100_000n), call: vi.fn(async () => ({ data: purpose === 'deploy' ? '0x' as const : encodeFunctionResult({
+    estimateGas: vi.fn(async () => 100_000n), call: vi.fn(async ({ data }) => data === CALLER_GETTER_DATA ? callerReply(plan.sender) : ({ data: purpose === 'deploy' ? '0x' as const : encodeFunctionResult({
       abi: BATCH_EXECUTOR_ABI, functionName: 'execute', result: plan.expectedSimulation!.map((a) => ({ success: a.success, data: a.returnData, returnDataSize: BigInt(a.returnDataSize) })),
     }) })),
     sendRawTransaction: vi.fn(async ({ serializedTransaction }) => {
@@ -51,14 +52,22 @@ async function context(changes: Partial<RunnerClient> = {}, purpose: 'deploy' | 
     }),
     ...changes,
   };
-  const signerLoader = vi.fn(async () => ({ async sign(tx: UnsignedTestnetTransaction) {
+  const sign = vi.fn(async (tx: UnsignedTestnetTransaction) => {
     const raw = await account.signTransaction(tx); signed.set(keccak256(raw), tx); return raw;
-  } }));
+  });
+  const signerLoader = vi.fn(async () => ({ sign }));
   const artifactLoader: RunnerDependencies['artifactLoader'] = async (name) => ({ contractName: name,
     source: 'UNIT FIXTURE', sourceHash: 'UNIT FIXTURE', compiler: 'solc-0.8.24', evmVersion: 'paris', optimizerRuns: 200,
     abi: [], bytecode: '0x6000', runtimeBytecode: '0x00', runtimeCodeHash: keccak256('0x00'), bytecodeHash: keccak256('0x6000') } satisfies ContractArtifact);
   const deps: RunnerDependencies = { client, journal, signerLoader, artifactLoader, onEvidence: vi.fn(async () => {}) };
-  return { plan, hash, deps, client, signerLoader, journal };
+  return { plan, hash, deps, client, signerLoader, sign, journal, dir };
+}
+
+function approvalClock(c: Awaited<ReturnType<typeof context>>) {
+  let time = Date.parse(c.plan.createdAt) + 1_000;
+  const expires = Date.parse(c.plan.expiresAt);
+  c.deps.now = () => time;
+  return { expires, expire() { time = expires; }, beforeExpiry() { time = expires - 1; } };
 }
 
 describe('gated testnet runner — offline mock requests only', () => {
@@ -122,6 +131,47 @@ describe('gated testnet runner — offline mock requests only', () => {
     expect(c.client.sendRawTransaction).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects a batch owned by a different wallet before loading signing configuration', async () => {
+    const c = await context({ call: vi.fn(async () => callerReply('0x1111111111111111111111111111111111111111')) }, 'batch');
+    await expect(executeApprovedPlan(c.plan, c.hash, true, c.deps)).rejects.toThrow(/authorized caller/);
+    expect(c.signerLoader).not.toHaveBeenCalled();
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect(await c.journal.read()).toHaveLength(0);
+  });
+
+  it('a deployment receipt with a different authorized caller remains UNVERIFIED', async () => {
+    const c = await context({ call: vi.fn(async () => callerReply('0x1111111111111111111111111111111111111111')) });
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.steps.map((step) => step.state)).toEqual(['UNVERIFIED', 'NOT_SUBMITTED']);
+    expect(result.steps[0]?.receipt?.gasUsed).toBe(120_000n);
+    expect(c.client.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(c.client.call).mock.calls[0]?.[0]).toMatchObject({ data: CALLER_GETTER_DATA, blockNumber: 9n, to: c.plan.transactions[0]!.expectedContractAddress });
+  });
+
+  it('rechecks the authorized caller after signing and refuses a changed RPC ownership response', async () => {
+    const c = await context({}, 'batch');
+    const call = c.client.call;
+    c.client.call = vi.fn(async (request) => c.sign.mock.calls.length > 0 && request.data === CALLER_GETTER_DATA
+      ? callerReply('0x1111111111111111111111111111111111111111') : call(request));
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.steps[0]?.state).toBe('NOT_SUBMITTED');
+    expect(c.sign).toHaveBeenCalledTimes(1);
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect(await c.journal.read()).toHaveLength(0);
+  });
+
+  it('a batch receipt-block ownership mismatch cannot be reported as committed action success', async () => {
+    const c = await context({}, 'batch');
+    const call = c.client.call;
+    c.client.call = vi.fn(async (request) => request.data === CALLER_GETTER_DATA && request.blockNumber === 9n
+      ? callerReply('0x1111111111111111111111111111111111111111') : call(request));
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.steps[0]?.state).toBe('UNVERIFIED');
+    expect(result.steps[0]?.receipt?.gasUsed).toBe(120_000n);
+    expect(result.steps[0]?.actions?.every((a) => a.success === null)).toBe(true);
+    expect(c.client.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
   it('malformed signer output is rejected OFFLINE before any intent or send', async () => {
     const c = await context();
     c.deps.signerLoader = async () => ({ sign: async () => '0x01' });
@@ -145,7 +195,7 @@ describe('gated testnet runner — offline mock requests only', () => {
   });
 
   it('fresh simulation divergence blocks the batch BEFORE key loading', async () => {
-    const c = await context({ call: vi.fn(async () => ({ data: encodeFunctionResult({ abi: BATCH_EXECUTOR_ABI, functionName: 'execute',
+    const c = await context({ call: vi.fn(async ({ data, account }) => data === CALLER_GETTER_DATA ? callerReply(account) : ({ data: encodeFunctionResult({ abi: BATCH_EXECUTOR_ABI, functionName: 'execute',
       result: [{ success: false, data: '0x', returnDataSize: 0n }, { success: true, data: '0x', returnDataSize: 0n }, { success: true, data: '0x', returnDataSize: 0n }],
     }) })) }, 'batch');
     await expect(executeApprovedPlan(c.plan, c.hash, true, c.deps)).rejects.toThrow(/outcomes differ/);
@@ -194,6 +244,152 @@ describe('gated testnet runner — offline mock requests only', () => {
     const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
     expect(result.steps.every((s) => s.state === 'NOT_SUBMITTED')).toBe(true);
     expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect(await c.journal.read()).toHaveLength(0);
+  });
+
+  it.each(['artifact checks', 'journal acquisition', 'initial evidence persistence', 'signer loading'] as const)('fails closed when approval expires during %s', async (boundary) => {
+    const c = await context();
+    const clock = approvalClock(c);
+    if (boundary === 'artifact checks') {
+      const load = c.deps.artifactLoader!;
+      c.deps.artifactLoader = async (name) => { const artifact = await load(name); clock.expire(); return artifact; };
+    }
+    if (boundary === 'journal acquisition') {
+      const acquire = c.journal.acquire.bind(c.journal);
+      vi.spyOn(c.journal, 'acquire').mockImplementation(async (...args) => { await acquire(...args); clock.expire(); });
+    }
+    if (boundary === 'initial evidence persistence') c.deps.onEvidence = async () => { await Promise.resolve(); clock.expire(); };
+    if (boundary === 'signer loading') {
+      const load = c.deps.signerLoader;
+      c.deps.signerLoader = async () => { const signer = await load(); clock.expire(); return signer; };
+    }
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.state).toBe('HALTED');
+    expect(result.steps.every((step) => step.state === 'NOT_SUBMITTED')).toBe(true);
+    expect(c.sign).not.toHaveBeenCalled();
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect(await c.journal.read()).toHaveLength(0);
+    expect(c.signerLoader).toHaveBeenCalledTimes(boundary === 'signer loading' ? 1 : 0);
+  });
+
+  it.each([
+    ['initial preflight', 1, 'NOT_SUBMITTED'], ['pre-sign checks', 2, 'NOT_SUBMITTED'], ['post-sign checks', 3, 'ABORTED_BEFORE_SEND'],
+  ] as const)('catches expiry during %s, including awaits after signed-payload verification', async (_label, expireRead, expected) => {
+    const c = await context();
+    const clock = approvalClock(c);
+    const read = c.client.getBlock;
+    let reads = 0;
+    c.client.getBlock = vi.fn(async (request) => { const block = await read(request); if (++reads === expireRead) clock.expire(); return block; });
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.state).toBe('HALTED');
+    expect(result.steps.map((step) => step.state)).toEqual([expected, 'NOT_SUBMITTED']);
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect((await c.journal.read()).map((entry) => entry.state)).toEqual(expected === 'ABORTED_BEFORE_SEND' ? ['INTENT', 'ABORTED_BEFORE_SEND'] : []);
+  });
+
+  it('rechecks expiry after a fresh per-step gas-estimate await, before signing', async () => {
+    const c = await context();
+    const clock = approvalClock(c);
+    const estimate = c.client.estimateGas;
+    let estimates = 0;
+    c.client.estimateGas = vi.fn(async (request) => { const gas = await estimate(request); if (++estimates === 3) clock.expire(); return gas; });
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.steps.every((step) => step.state === 'NOT_SUBMITTED')).toBe(true);
+    expect(c.sign).not.toHaveBeenCalled();
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rechecks expiry after a fresh per-step batch-simulation await, before signing', async () => {
+    const c = await context({}, 'batch');
+    const clock = approvalClock(c);
+    const call = c.client.call;
+    let simulations = 0;
+    c.client.call = vi.fn(async (request) => { const reply = await call(request); if (request.data !== CALLER_GETTER_DATA && ++simulations === 2) clock.expire(); return reply; });
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.steps[0]?.state).toBe('NOT_SUBMITTED');
+    expect(c.sign).not.toHaveBeenCalled();
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it('catches expiry during the final post-sign ownership getter and marks every batch action not submitted', async () => {
+    const c = await context({}, 'batch');
+    const clock = approvalClock(c);
+    const call = c.client.call;
+    c.client.call = vi.fn(async (request) => { const reply = await call(request); if (request.data === CALLER_GETTER_DATA && c.sign.mock.calls.length > 0) clock.expire(); return reply; });
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.steps[0]?.state).toBe('ABORTED_BEFORE_SEND');
+    expect(result.steps[0]?.actions?.every((a) => a.status === 'not_submitted' && a.success === null)).toBe(true);
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect(result.comparison?.batch.measuredGas).toBeUndefined();
+    expect((await c.journal.read()).map((entry) => entry.state)).toEqual(['INTENT', 'ABORTED_BEFORE_SEND']);
+  });
+
+  it.each(['intent journal fsync', 'intent evidence persistence'] as const)('final expiry guard prevents ALL send calls after delayed %s and retains retry-blocking intents', async (boundary) => {
+    const c = await context();
+    const clock = approvalClock(c);
+    if (boundary === 'intent journal fsync') {
+      const append = c.journal.append.bind(c.journal);
+      vi.spyOn(c.journal, 'append').mockImplementation(async (entry) => { await append(entry); if (entry.state === 'INTENT') clock.expire(); });
+    } else c.deps.onEvidence = async (snapshot) => { await Promise.resolve(); if (snapshot.steps[0]?.state === 'INTENT') clock.expire(); };
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.state).toBe('HALTED');
+    expect(result.steps.map((step) => step.state)).toEqual(['ABORTED_BEFORE_SEND', 'NOT_SUBMITTED']);
+    expect(result.steps[0]?.error).toContain('No RPC submission attempted');
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    const entries = await c.journal.read();
+    expect(entries.map((entry) => entry.state)).toEqual(['INTENT', 'ABORTED_BEFORE_SEND']);
+    expect(entries[0]?.transactionHash).toBe(entries[1]?.transactionHash);
+    const same = new ExecutionJournal(c.dir, c.hash);
+    await expect(same.acquire(c.plan.sender, [0])).rejects.toThrow(/execution intent/);
+    const freshPlan = structuredClone(c.plan);
+    freshPlan.createdAt = new Date(clock.expires + 1_000).toISOString();
+    freshPlan.expiresAt = new Date(clock.expires + 61_000).toISOString();
+    const freshHash = broadcastPlanHash(freshPlan);
+    const freshDeps = { ...c.deps, journal: new ExecutionJournal(c.dir, freshHash), now: () => clock.expires + 2_000 };
+    await expect(executeApprovedPlan(freshPlan, freshHash, true, freshDeps)).rejects.toThrow(/sender\/nonce already has an intent/);
+    expect(c.signerLoader).toHaveBeenCalledTimes(1);
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it('an abort-journal persistence failure still cannot send and never removes the original INTENT', async () => {
+    const c = await context();
+    const clock = approvalClock(c);
+    c.deps.onEvidence = async (snapshot) => { if (snapshot.steps[0]?.state === 'INTENT') clock.expire(); };
+    const append = c.journal.append.bind(c.journal);
+    vi.spyOn(c.journal, 'append').mockImplementation(async (entry) => {
+      if (entry.state === 'ABORTED_BEFORE_SEND') throw new Error('untrusted disk error contents');
+      await append(entry);
+    });
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.steps[0]?.state).toBe('ABORTED_BEFORE_SEND');
+    expect(result.steps[0]?.error).toContain('abort persistence failed');
+    expect(result.steps[0]?.error).not.toContain('untrusted');
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect((await c.journal.read()).map((entry) => entry.state)).toEqual(['INTENT']);
+  });
+
+  it('expiry is a submission deadline, not a requirement that confirmation finish before expiry', async () => {
+    const c = await context({}, 'batch');
+    const clock = approvalClock(c);
+    c.deps.onEvidence = async (snapshot) => { if (snapshot.steps[0]?.state === 'INTENT') clock.beforeExpiry(); };
+    const send = c.client.sendRawTransaction;
+    c.client.sendRawTransaction = vi.fn(async (request) => {
+      expect(c.deps.now!()).toBe(clock.expires - 1);
+      clock.expire();
+      return send(request);
+    });
+    expect((await executeApprovedPlan(c.plan, c.hash, true, c.deps)).state).toBe('CONFIRMED');
+    expect(c.client.sendRawTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('expiry after the first setup confirmation never authorizes the second setup send', async () => {
+    const c = await context();
+    const clock = approvalClock(c);
+    c.deps.onEvidence = async (snapshot) => { if (snapshot.steps[0]?.state === 'CONFIRMED') clock.expire(); };
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.steps.map((step) => step.state)).toEqual(['CONFIRMED', 'NOT_SUBMITTED']);
+    expect(c.client.sendRawTransaction).toHaveBeenCalledTimes(1);
+    expect((await c.journal.read()).map((entry) => entry.state)).toEqual(['INTENT', 'SUBMITTED', 'CONFIRMED']);
   });
 
   it.each(['chainId', 'nonce', 'gas', 'gasPrice', 'value', 'data'] as const)('rejects a valid signature with altered %s before intent', async (field) => {

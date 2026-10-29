@@ -17,6 +17,17 @@ describe('receipt verification (synthetic fixtures, offline)', () => {
     expect(receipt.feeWei).toBe(1_200_000_000_000_000n);
   });
 
+  it('captures canonical parent and transaction-count observations without inventing missing metadata', () => {
+    const receipt = verifyReceipt(rawReceipt(), HASH, { ...CHECKS, canonicalBlockParentHash: HASH, canonicalBlockTransactionCount: 3 });
+    expect(receipt).toMatchObject({ parentBlockHash: HASH, blockTransactionCount: 3 });
+    expect(verifyReceipt(rawReceipt(), HASH, CHECKS)).not.toHaveProperty('blockTransactionCount');
+    expect(verifyReceipt(rawReceipt(), HASH, CHECKS)).not.toHaveProperty('parentBlockHash');
+  });
+
+  it.each([-1, 0, 0.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])('rejects an invalid canonical block transaction count: %s', (count) => {
+    expect(() => verifyReceipt(rawReceipt(), HASH, { ...CHECKS, canonicalBlockTransactionCount: count })).toThrow(/canonical block transaction count/);
+  });
+
   it('preserves reverted status rather than inventing success', () => {
     expect(verifyReceipt({ ...rawReceipt(), status: 'reverted' }, HASH, CHECKS).status).toBe('reverted');
   });

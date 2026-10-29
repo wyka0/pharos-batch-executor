@@ -5,14 +5,16 @@ An installable `SKILL.md` package and TypeScript/Solidity implementation for
 Pharos **Atlantic Testnet (688689)**. Default operation is simulation; live
 signing and broadcasting require a fresh, explicitly approved full-plan hash.
 
-> **Status:** local EVM demonstration verified; no Atlantic deployment or
-> broadcast is claimed. This is hardened, tested testnet software, **not an
-> independently audited mainnet product**. See [submission status](SUBMISSION.md).
+> **Status:** deployer-authorized hardening is local and uncommitted. The saved
+> local EVM proof is **pre-hardening**, not gas/deployment proof for the revised
+> contract. No fresh local-chain or Atlantic deployment/broadcast is claimed.
+> This is testnet software, **not an independently audited mainnet product**.
+> See [submission status](SUBMISSION.md).
 
-## Verified result
+## Historical execution-only result — pre-hardening
 
-The disposable Anvil experiment restores the exact starting block/state root
-between the individual baseline and batch execution:
+The frozen disposable Anvil experiment restored the exact starting block/state
+root between the individual baseline and batch execution:
 
 | Execution | Actual receipt gas | Transactions |
 |---|---:|---:|
@@ -20,12 +22,20 @@ between the individual baseline and batch execution:
 | One batch, same six writes | 235,910 | 1 |
 | Reduction | **38,032 gas / 13.88%** | **5 / 83.33%** |
 
-These are **real local EVM receipts, not Atlantic hashes**. Baseline receipts
-were captured/verified before `evm_revert`; their discarded branch is no longer
-queryable. Review [curated local evidence](evidence/local/README.md) or reproduce
-it with `npm run demo:local`.
+These are **real historical local EVM receipts, not Atlantic hashes**. They measure
+the old executor, not the revised 3,190-byte runtime. Baseline receipts were
+captured before `evm_revert`; their discarded branch is no longer queryable.
+The [curated local evidence](evidence/local/README.md) is unchanged. New comparisons
+reject its legacy unbound captures rather than inventing current metadata.
 
-The full local demonstration submits **14** transactions: two setup deployments,
+First-use gas is different: the historical executor deployment cost **740,669**
+gas, and common test-target setup cost **221,814**. Including that setup gives
+**495,756 individual vs 1,198,393 batch gas**, a **702,637-gas batch premium**.
+Deployment would amortize after roughly **20 similar batches only if** the old
+38,032-gas execution saving persisted. [Full accounting and strict comparison
+requirements](docs/evidence.md); revised-contract gas remains unmeasured.
+
+The saved local demonstration submitted **14** transactions: two setup deployments,
 six individual baseline transactions, five one-transaction scenario batches,
 and one refund withdrawal. Setup/baseline/withdrawal costs are not hidden inside
 the one-batch execution count.
@@ -36,7 +46,7 @@ the one-batch execution count.
 |---|---|
 | At least 3 independent actions | Strict 3–32 validation; explicit independence and unique IDs |
 | Genuine batching | One payable `execute(Action[])` transaction; no sequential-send disguise |
-| Gas saving / step reduction | Actual same-state local receipts, labeled estimates and counts |
+| Gas saving / step reduction | Frozen pre-hardening execution-only receipts; current strict comparison gates, labeled estimates and counts |
 | Clear partial failure | One ordered result event per action; bounded gas/return data; later effects asserted |
 
 ## Quick start
@@ -51,16 +61,19 @@ npm run verify
 # No network, wallet, deployment or key:
 npm run demo:simulated -- --scenario mixed
 npm run cli -- validate --actions examples/model-actions.json
-
-# Explicit disposable local EVM, never Atlantic:
-npm run demo:local
 ```
 
 `verify` builds source-bound contract artifacts, typechecks, lints, runs offline
 unit tests and Solidity tests, builds the production CLI and scans public files.
-It does not sign or broadcast. Foundry may download solc if it is not cached.
+It uses only test-generated in-memory signatures and Foundry's in-process test
+EVM; it does not load real-wallet configuration, start Anvil/RPC or submit network
+transactions. Foundry may download solc if it is not cached.
 Offline production smoke checks also verify compiled CLI behavior, portable
 declarations and the SHA-256 manifest of the saved local proof.
+
+`npm run demo:local` is a separate, explicitly approved loopback deployment/demo,
+not part of `verify`. It would create **new current-source** receipts, not reproduce
+or replace the frozen proof. Do not run it during offline-only hardening.
 
 ## Action format
 
@@ -81,11 +94,26 @@ as decimal strings or nonnegative safe integers. Unknown fields, dependencies,
 invalid checksums, malformed calldata, duplicate IDs and out-of-range gas are
 rejected. [Full format and unsupported workflows](docs/actions.md).
 
-**Important:** a target sees the executor as `msg.sender`, not the wallet.
-Native transfers and sender-independent contract writes are suitable examples.
-Wallet-owned ERC20 transfers, sender-specific claims, approval/swap sequences
-and other dependent workflows are **not supported**. CALL success does not
-interpret a token's `false` return or prove application postconditions.
+Action syntax limits are not execution guarantees. The contract reserves gas for
+all calls together; **32 default 100,000-gas calls require 5,230,816 execution
+reserve**, before intrinsic/calldata/validation overhead, exceeding the runner's
+unchanged 5,000,000-gas ceiling. Undersized approved bounds are rejected.
+
+**Caller boundary:** the constructor binds `authorizedCaller` to the immediate
+deployer in write-once storage. Only that caller can execute; there is no setter,
+upgrade, delegatecall or forwarding bypass. Use one executor per wallet, not a
+permissionless shared approval proxy. Runtime hashes and the caller getter are
+checked before signing/sending and when verifying successful deployment/batch
+receipts.
+
+**Important:** targets see the executor as `msg.sender`, not the wallet. The
+authorized caller remains trusted for arbitrary reviewed CALLs, including
+executor-held token transfers, pre-existing `transferFrom` allowances and token
+approvals. Strangers cannot make those calls; this is not a sandbox against the
+authorized caller. Do not fund or approve an executor by default. Wallet-owned
+`transfer`, sender-specific claims, approve-then-swap and other dependent workflows
+are **not supported**. CALL success does not interpret a token's `false` return
+or prove business postconditions.
 
 ## CLI and Atlantic workflow
 
@@ -106,8 +134,11 @@ after deployment with `npm run actions:demo -- --target <test-only-counter>
 Broadcast is deliberately a separate command. [The approval workflow](docs/atlantic.md)
 requires explicit user consent for the exact plan, network and sender, plus
 `--approve-plan`, `--confirm-atlantic-testnet` and a local `--env-file` path.
-Do not load or paste signing configuration during dry-runs. Any uncertain send
-halts remaining transactions and is never retried automatically.
+Do not load or paste signing configuration during dry-runs. Approval is checked
+synchronously immediately before submission, after all pre-send awaits. Expiry
+at that boundary produces terminal `ABORTED_BEFORE_SEND` with no RPC send;
+durable sender/nonce intents remain. Neither an abort nor an uncertain send
+authorizes an automatic retry or replacement plan.
 
 ## Skill installation
 
@@ -132,8 +163,8 @@ a production-only npm install is not a substitute for that setup.
 
 ## Design and evidence
 
-- [`contracts/BatchExecutor.sol`](contracts/BatchExecutor.sol): permissionless
-  non-upgradeable CALL executor; no admin, delegatecall or blanket approvals.
+- [`contracts/BatchExecutor.sol`](contracts/BatchExecutor.sol): deployer-only,
+  non-upgradeable bounded CALL executor; no caller setter or delegatecall.
 - [`src/`](src/): validation, exact calldata, model/read-only adapters, receipt
   verification, comparisons, public evidence and production CLI.
 - [`src/testnet/`](src/testnet/): expiring approval plans, code/nonce/fee checks,

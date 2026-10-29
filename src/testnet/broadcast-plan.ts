@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { getContractAddress } from 'viem';
 
 import { ExecutionGateError } from '../errors.js';
-import { MAX_RETURN_DATA_BYTES } from '../limits.js';
+import { MAX_RETURN_DATA_BYTES, minimumBatchTransactionGas } from '../limits.js';
 import { ATLANTIC } from '../network.js';
 import { preparePlan } from '../plan.js';
 import type { BatchActionInput, Hex } from '../types.js';
@@ -127,6 +127,7 @@ export function verifyApproval(plan: BroadcastPlan, approval: string, confirmed:
     if (plan.purpose === 'batch') {
       const tx = plan.transactions[0]!;
       if (plan.transactions.length !== 1 || tx.kind !== 'batch' || tx.to?.toLowerCase() !== plan.batchExecutor?.toLowerCase() || tx.data !== prepared.batchCalldata || decimal(tx.valueWei) !== prepared.totalValue) fail('Batch approval must describe exactly ONE transaction matching every validated action.');
+      if (decimal(tx.gasLimit) < minimumBatchTransactionGas(prepared.actions, prepared.batchCalldata)) fail('Approved batch gas bound is below execution reservation plus intrinsic/calldata gas; accepted action counts do not guarantee runner feasibility.');
     } else {
       if (plan.transactions.length !== actions.length) fail('Baseline must contain one individual transaction per action.');
       for (const [i, tx] of plan.transactions.entries()) {

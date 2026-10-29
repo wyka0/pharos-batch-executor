@@ -6,7 +6,7 @@ import { stringifyPublicJson } from '../evidence.js';
 
 export interface JournalEntry {
   at: string; planHash: string; index: number; id: string;
-  state: 'INTENT' | 'SUBMITTED' | 'CONFIRMED' | 'REVERTED' | 'UNKNOWN' | 'UNVERIFIED';
+  state: 'INTENT' | 'SUBMITTED' | 'CONFIRMED' | 'REVERTED' | 'UNKNOWN' | 'UNVERIFIED' | 'ABORTED_BEFORE_SEND';
   transactionHash: `0x${string}`;
   nonce: number;
   receipt?: unknown;
@@ -54,7 +54,7 @@ export class ExecutionJournal {
 
   async append(entry: JournalEntry): Promise<void> {
     if (this.ownedLocks.length === 0) throw new ExecutionGateError('Journal lock required before submission.');
-    validateEntry(entry, this.planHash);
+    validateJournalSequence([...(await this.read()), entry], this.planHash);
     const data = stringifyPublicJson(entry);
     // Never store raw signed payloads, private keys, environment contents, or
     // exception objects. Only explicitly shaped public evidence goes here.
@@ -84,11 +84,9 @@ export class ExecutionJournal {
     }
     try {
       if (contents !== '' && !contents.endsWith('\n')) throw new Error('partial append');
-      return contents.split('\n').filter(Boolean).map((line) => {
-        const entry = JSON.parse(line) as JournalEntry;
-        validateEntry(entry, this.planHash);
-        return entry;
-      });
+      const entries = contents.split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalEntry);
+      validateJournalSequence(entries, this.planHash);
+      return entries;
     }
     catch { throw new ExecutionGateError('Journal is incomplete or corrupt; manual reconciliation required, not a send retry.'); }
   }
@@ -107,8 +105,35 @@ function validateEntry(entry: JournalEntry, planHash: string): void {
   const fields = ['at', 'planHash', 'index', 'id', 'state', 'transactionHash', 'nonce', 'receipt', 'error'];
   if (entry === null || typeof entry !== 'object' || Object.keys(entry).some((key) => !fields.includes(key)) ||
     entry.planHash !== planHash || !Number.isSafeInteger(entry.index) || entry.index < 0 || !Number.isSafeInteger(entry.nonce) || entry.nonce < 0 ||
-    !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(entry.id) || !/^0x[0-9a-fA-F]{64}$/.test(entry.transactionHash) ||
-    !Number.isFinite(Date.parse(entry.at)) || !['INTENT', 'SUBMITTED', 'CONFIRMED', 'REVERTED', 'UNKNOWN', 'UNVERIFIED'].includes(entry.state)) {
+    typeof entry.id !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(entry.id) || typeof entry.transactionHash !== 'string' || !/^0x[0-9a-fA-F]{64}$/.test(entry.transactionHash) ||
+    typeof entry.at !== 'string' || !Number.isFinite(Date.parse(entry.at)) || (entry.error !== undefined && typeof entry.error !== 'string') ||
+    !['INTENT', 'SUBMITTED', 'CONFIRMED', 'REVERTED', 'UNKNOWN', 'UNVERIFIED', 'ABORTED_BEFORE_SEND'].includes(entry.state) ||
+    (entry.state === 'ABORTED_BEFORE_SEND' && entry.receipt !== undefined)) {
     throw new ExecutionGateError('Invalid or unsafe journal entry.');
+  }
+}
+
+/** Abort is terminal and can follow only an unsent INTENT, never SUBMITTED. */
+export function validateJournalSequence(entries: readonly JournalEntry[], planHash: string): void {
+  const latest = new Map<number, JournalEntry>();
+  const hashes = new Set<string>();
+  const nonces = new Set<number>();
+  const ids = new Set<string>();
+  for (const entry of entries) {
+    validateEntry(entry, planHash);
+    const previous = latest.get(entry.index);
+    if (previous === undefined) {
+      if (entry.state !== 'INTENT' || hashes.has(entry.transactionHash.toLowerCase()) || nonces.has(entry.nonce) || ids.has(entry.id)) {
+        throw new ExecutionGateError('Journal intent/hash/state sequence is inconsistent; manual investigation required.');
+      }
+      hashes.add(entry.transactionHash.toLowerCase()); nonces.add(entry.nonce); ids.add(entry.id);
+    } else {
+      const allowed: readonly JournalEntry['state'][] = previous.state === 'INTENT' ? ['SUBMITTED', 'UNKNOWN', 'ABORTED_BEFORE_SEND']
+        : previous.state === 'SUBMITTED' ? ['CONFIRMED', 'REVERTED', 'UNKNOWN', 'UNVERIFIED'] : [];
+      if (entry.id !== previous.id || entry.nonce !== previous.nonce || entry.transactionHash.toLowerCase() !== previous.transactionHash.toLowerCase() || !allowed.includes(entry.state)) {
+        throw new ExecutionGateError('Journal intent/hash/state sequence is inconsistent; manual investigation required.');
+      }
+    }
+    latest.set(entry.index, entry);
   }
 }
