@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+out/
+cache/
+lib/
+forge-cache/
+state/
+evidence/runs/
+*.local.env
+*.env
+.env*
+anvil.log
+*.log

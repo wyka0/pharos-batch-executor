@@ -1,0 +1,12 @@
+{
+  "classification": "LOCAL ANVIL ONLY",
+  "hash": "0xb8c690a1cb2bea2cb32eaced02cb542322fd2b5de66cbba53e1eea671c26f5ff",
+  "nonce": 3,
+  "request": {
+    "to": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+    "data": "0x6cfd19ea98d1f5e520b06b253463f93c12a1cb831e62da63a009f917bbd671a559e8a79f000000000000000000000000000000000000000000000000000000000000000b",
+    "value": "0",
+    "gas": "54789"
+  },
+  "gasPrice": "1676366677"
+}

@@ -1,0 +1,32 @@
+name: Verify Batch Executor
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.2.3
+      - run: npm ci
+      - run: npm run verify
+      - run: npm run demo:local
+      - run: npm audit --audit-level=low
+      - run: node dist/cli.js --help
+      - name: Preserve local proof even if assertions fail
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-evm-evidence
+          path: evidence/runs/
+          if-no-files-found: ignore
+          retention-days: 14

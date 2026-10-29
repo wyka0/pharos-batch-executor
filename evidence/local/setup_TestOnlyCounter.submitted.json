@@ -1,0 +1,8 @@
+{
+  "classification": "LOCAL ANVIL ONLY",
+  "name": "TestOnlyCounter",
+  "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+  "hash": "0x72c383ef9d2828d52575f2884648785a8761de8cb722e1104b51bab06b0a15c7",
+  "nonce": 1,
+  "bytecodeHash": "0x608a2195c505f04c57096de00ddbac838846f3d3911d24913b3cf64c7a4bd4d3"
+}

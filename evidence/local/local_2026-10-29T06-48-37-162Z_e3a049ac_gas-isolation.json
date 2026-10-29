@@ -1,0 +1,286 @@
+{
+  "schemaVersion": 1,
+  "skill": "pharos-batch-executor",
+  "runId": "local_2026-10-29T06-48-37-162Z_e3a049ac_gas-isolation",
+  "metadata": {
+    "adapter": "local-anvil",
+    "chainId": 31337,
+    "startedAt": "2026-10-29T06:48:40.334Z",
+    "finishedAt": "2026-10-29T06:48:40.671Z",
+    "rpcUrl": "http://127.0.0.1:36454",
+    "estimateBlockNumber": "4"
+  },
+  "plan": {
+    "planHash": "sha256:6975ee3dd58ce52377dcafca79314137bf0ade4f36c097fa55602a17899965d0",
+    "actions": [
+      {
+        "index": 0,
+        "id": "gas-isolation-before",
+        "idBytes32": "0xecba3f9d09152ef2d228dce3573a48a05d0802ba380055ea97a29527acdcd23d",
+        "target": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "calldata": "0x6cfd19eaecba3f9d09152ef2d228dce3573a48a05d0802ba380055ea97a29527acdcd23d0000000000000000000000000000000000000000000000000000000000000065",
+        "valueWei": "0",
+        "gasLimit": "100000",
+        "independent": true
+      },
+      {
+        "index": 1,
+        "id": "gas-exhaustion",
+        "idBytes32": "0xd6da4d7497e1a7997cf83bdaf484f3e05e4047afae6e94ab9fc7ec453a851d08",
+        "target": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "calldata": "0xb9554c59",
+        "valueWei": "0",
+        "gasLimit": "25000",
+        "independent": true
+      },
+      {
+        "index": 2,
+        "id": "gas-isolation-after",
+        "idBytes32": "0xd349193f64df253cb1378539133e6a1ab19a1c60234c6b2494743d63d1d71cfc",
+        "target": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "calldata": "0x6cfd19ead349193f64df253cb1378539133e6a1ab19a1c60234c6b2494743d63d1d71cfc000000000000000000000000000000000000000000000000000000000000012f",
+        "valueWei": "0",
+        "gasLimit": "100000",
+        "independent": true
+      }
+    ],
+    "batchCalldata": "0xa0989ce000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000001800000000000000000000000000000000000000000000000000000000000000260ecba3f9d09152ef2d228dce3573a48a05d0802ba380055ea97a29527acdcd23d000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f0512000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000186a000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000446cfd19eaecba3f9d09152ef2d228dce3573a48a05d0802ba380055ea97a29527acdcd23d000000000000000000000000000000000000000000000000000000000000006500000000000000000000000000000000000000000000000000000000d6da4d7497e1a7997cf83bdaf484f3e05e4047afae6e94ab9fc7ec453a851d08000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f0512000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000061a800000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000004b9554c5900000000000000000000000000000000000000000000000000000000d349193f64df253cb1378539133e6a1ab19a1c60234c6b2494743d63d1d71cfc000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f0512000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000186a000000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000446cfd19ead349193f64df253cb1378539133e6a1ab19a1c60234c6b2494743d63d1d71cfc000000000000000000000000000000000000000000000000000000000000012f00000000000000000000000000000000000000000000000000000000",
+    "batchExecutorAddress": "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+  },
+  "estimates": {
+    "individual": [
+      {
+        "gas": "45645",
+        "estimate": true,
+        "source": "rpc"
+      },
+      {
+        "gas": null,
+        "estimate": true,
+        "source": "rpc",
+        "error": "Gas estimation failed for \"gas-exhaustion\" (revert, RPC, or gas exhaustion)."
+      },
+      {
+        "gas": "45669",
+        "estimate": true,
+        "source": "rpc"
+      }
+    ],
+    "batch": {
+      "gas": "510809",
+      "estimate": true,
+      "source": "rpc"
+    },
+    "blockNumber": "4",
+    "individualTotal": null
+  },
+  "batch": {
+    "kind": "batch",
+    "state": "confirmed",
+    "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+    "receipt": {
+      "evidence": "actual",
+      "txHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+      "status": "success",
+      "gasUsed": "131539",
+      "blockNumber": "5",
+      "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+      "effectiveGasPrice": "1267058145",
+      "feeWei": "166667561335155",
+      "confirmations": "1"
+    },
+    "rawReceipt": {
+      "type": "legacy",
+      "status": "success",
+      "cumulativeGasUsed": "131539",
+      "logs": [
+        {
+          "address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+          "topics": [
+            "0x8c57df3e5ba0302b89ddf106dc66b41ee1cb11bcfbd13fad0a8c03f658e0a153",
+            "0xecba3f9d09152ef2d228dce3573a48a05d0802ba380055ea97a29527acdcd23d"
+          ],
+          "data": "0x0000000000000000000000000000000000000000000000000000000000000065",
+          "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+          "blockNumber": "5",
+          "blockTimestamp": "1793256520",
+          "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+          "transactionIndex": 0,
+          "logIndex": 0,
+          "removed": false
+        },
+        {
+          "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+          "topics": [
+            "0xa2572f557b704844ee4fef1837f9be93778c4410bd725743bbe24d1414e8dc8d",
+            "0x0000000000000000000000000000000000000000000000000000000000000000",
+            "0xecba3f9d09152ef2d228dce3573a48a05d0802ba380055ea97a29527acdcd23d",
+            "0x000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f0512"
+          ],
+          "data": "0x00000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000060000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000065",
+          "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+          "blockNumber": "5",
+          "blockTimestamp": "1793256520",
+          "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+          "transactionIndex": 0,
+          "logIndex": 1,
+          "removed": false
+        },
+        {
+          "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+          "topics": [
+            "0xa2572f557b704844ee4fef1837f9be93778c4410bd725743bbe24d1414e8dc8d",
+            "0x0000000000000000000000000000000000000000000000000000000000000001",
+            "0xd6da4d7497e1a7997cf83bdaf484f3e05e4047afae6e94ab9fc7ec453a851d08",
+            "0x000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f0512"
+          ],
+          "data": "0x0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+          "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+          "blockNumber": "5",
+          "blockTimestamp": "1793256520",
+          "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+          "transactionIndex": 0,
+          "logIndex": 2,
+          "removed": false
+        },
+        {
+          "address": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512",
+          "topics": [
+            "0x8c57df3e5ba0302b89ddf106dc66b41ee1cb11bcfbd13fad0a8c03f658e0a153",
+            "0xd349193f64df253cb1378539133e6a1ab19a1c60234c6b2494743d63d1d71cfc"
+          ],
+          "data": "0x000000000000000000000000000000000000000000000000000000000000012f",
+          "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+          "blockNumber": "5",
+          "blockTimestamp": "1793256520",
+          "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+          "transactionIndex": 0,
+          "logIndex": 3,
+          "removed": false
+        },
+        {
+          "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+          "topics": [
+            "0xa2572f557b704844ee4fef1837f9be93778c4410bd725743bbe24d1414e8dc8d",
+            "0x0000000000000000000000000000000000000000000000000000000000000002",
+            "0xd349193f64df253cb1378539133e6a1ab19a1c60234c6b2494743d63d1d71cfc",
+            "0x000000000000000000000000e7f1725e7734ce288f8367e1bb143e90bb3f0512"
+          ],
+          "data": "0x0000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000012f",
+          "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+          "blockNumber": "5",
+          "blockTimestamp": "1793256520",
+          "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+          "transactionIndex": 0,
+          "logIndex": 4,
+          "removed": false
+        },
+        {
+          "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+          "topics": [
+            "0xca81223dee601f44c44ce11d952c9f947da2bb8f802f2fc0928e836f42a8cebf",
+            "0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          ],
+          "data": "0x000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000001",
+          "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+          "blockNumber": "5",
+          "blockTimestamp": "1793256520",
+          "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+          "transactionIndex": 0,
+          "logIndex": 5,
+          "removed": false
+        }
+      ],
+      "logsBloom": "0x040000000000000004000800000000000800000000140002000000000000000000000100000000000000000000000000110000000000000020000000000420000000000000000000000000000000000000000000800400000000000000000000000000400a0000200000400100000800000000000000000000080004000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000102000000000000000080000000000000100000001000000040000000200000000000001000000000002000000000000000000060000000000000000000000000000000000000000000008000800000800000000000",
+      "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+      "transactionIndex": 0,
+      "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+      "blockNumber": "5",
+      "gasUsed": "131539",
+      "effectiveGasPrice": "1267058145",
+      "blobGasPrice": "1",
+      "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+      "contractAddress": null
+    },
+    "actions": [
+      {
+        "index": 0,
+        "id": "gas-isolation-before",
+        "target": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "status": "succeeded",
+        "success": true,
+        "returnData": "0x0000000000000000000000000000000000000000000000000000000000000065",
+        "returnDataSource": "event",
+        "returnDataSize": "32",
+        "returnDataTruncated": false
+      },
+      {
+        "index": 1,
+        "id": "gas-exhaustion",
+        "target": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "status": "failed",
+        "success": false,
+        "returnData": "0x",
+        "returnDataSource": "event",
+        "returnDataSize": "0",
+        "returnDataTruncated": false,
+        "error": "call reverted or exhausted its gas limit without revert data"
+      },
+      {
+        "index": 2,
+        "id": "gas-isolation-after",
+        "target": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+        "status": "succeeded",
+        "success": true,
+        "returnData": "0x000000000000000000000000000000000000000000000000000000000000012f",
+        "returnDataSource": "event",
+        "returnDataSize": "32",
+        "returnDataTruncated": false
+      }
+    ],
+    "refundCreditWei": "0"
+  },
+  "comparison": {
+    "individual": {
+      "transactionCount": 3,
+      "estimatedGas": {
+        "gas": null,
+        "estimate": true,
+        "source": "rpc",
+        "error": "One or more individual estimates failed; total unavailable."
+      }
+    },
+    "batch": {
+      "transactionCount": 1,
+      "estimatedGas": {
+        "gas": "510809",
+        "estimate": true,
+        "source": "rpc"
+      },
+      "measuredGas": {
+        "gas": "131539",
+        "measured": true,
+        "receipts": 1
+      }
+    },
+    "transactionReduction": {
+      "count": 2,
+      "fraction": 0.6666666666666666
+    },
+    "baselineMethod": "Independent eth_estimateGas calls at the same block; no baseline transactions broadcast.",
+    "limitations": [
+      "Gas estimates are not measured usage. The executor reserves gas for every action, so the batch estimate can exceed actual gas used.",
+      "Targets see the executor as msg.sender. Sender-dependent operations and dependent approve/swap/claim workflows are unsupported.",
+      "Deployment, baseline experiments and refund withdrawals are separate transactions and excluded from per-batch execution counts.",
+      "CALL success does not prove application postconditions or interpret a token return value of false."
+    ]
+  },
+  "measurementDisclosures": {
+    "estimatesAreModelValues": false,
+    "measuredGasFromRealReceipts": true,
+    "executionEnvironment": "local-evm",
+    "callSuccessDoesNotGuaranteeBusinessSuccess": true,
+    "callerIsExecutorNotWallet": true
+  }
+}

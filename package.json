@@ -1,0 +1,51 @@
+{
+  "name": "pharos-batch-executor",
+  "version": "0.1.0",
+  "description": "Pharos SkillEngine-compatible skill that validates N>=3 independent EVM actions and executes them as ONE genuine batch transaction (on-chain per-action isolation), comparing measured gas and step counts against individual execution. Atlantic testnet (688689) path is gated behind an explicit plan-hash approval; default adapter is deterministic simulation.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.12.0 || ^24.0.0 || >=26.0.0"
+  },
+  "bin": {
+    "pharos-batch-executor": "dist/cli.js"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" }
+  },
+  "files": ["dist", "src", "scripts", "artifacts", "assets", "contracts", "docs", "examples", "evidence/local", "SKILL.md", "README.md", "LICENSE", "SECURITY.md", "SUBMISSION.md", "foundry.toml", "tsconfig.json", "tsconfig.build.json"],
+  "scripts": {
+    "cli": "tsx src/cli.ts",
+    "demo:simulated": "tsx src/cli.ts demo",
+    "demo:local": "node scripts/run-local-demo.mjs",
+    "actions:demo": "tsx scripts/make-demo-actions.ts",
+    "evidence:curate": "tsx scripts/curate-local-evidence.ts",
+    "contracts:build": "node scripts/build-contracts.mjs",
+    "contracts:test": "node scripts/test-contracts.mjs",
+    "testnet:readiness": "tsx scripts/testnet-readiness.ts",
+    "testnet:plan": "tsx scripts/testnet-plan.ts",
+    "testnet:run": "tsx scripts/testnet-run.ts",
+    "testnet:status": "tsx scripts/testnet-status.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "safety": "npm run build && node scripts/check-safety.mjs",
+    "smoke": "node scripts/check-production.mjs",
+    "verify": "npm run contracts:build && npm run typecheck && npm run lint && npm run test && npm run contracts:test && npm run build && node scripts/check-safety.mjs && npm run smoke"
+  },
+  "dependencies": {
+    "viem": "^2.57.11"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.13.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.0",
+    "vitest": "5.0.5"
+  }
+}

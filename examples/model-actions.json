@@ -1,0 +1,29 @@
+[
+  {
+    "id": "model-example-0",
+    "target": "0x1111111111111111111111111111111111111111",
+    "independent": true,
+    "value": "0",
+    "gasLimit": "100000",
+    "calldata": "0x6cfd19ea4fdbf961f0369e2dcfb4fb3bc593277e66ebe9a63f885c7c9df67dd867e9e4ab000000000000000000000000000000000000000000000000000000000000000a",
+    "note": "OFFLINE ONLY: placeholder target, not a deployed contract. Valid TestOnlyCounter ABI calldata for validation/calldata preparation; never use this example as a live plan."
+  },
+  {
+    "id": "model-example-1",
+    "target": "0x1111111111111111111111111111111111111111",
+    "independent": true,
+    "value": "0",
+    "gasLimit": "100000",
+    "calldata": "0x6cfd19ea000af2d04b0f82671e5526a201a78bbca0dcb5b2734759b78eaa4038fd0b17d8000000000000000000000000000000000000000000000000000000000000000b",
+    "note": "OFFLINE ONLY: placeholder target, not a deployed contract. Valid TestOnlyCounter ABI calldata for validation/calldata preparation; never use this example as a live plan."
+  },
+  {
+    "id": "model-example-2",
+    "target": "0x1111111111111111111111111111111111111111",
+    "independent": true,
+    "value": "0",
+    "gasLimit": "100000",
+    "calldata": "0x6cfd19ea38424570a9cdff5ecea9076da7699630ebe9bd372adc52432090b8517f38e404000000000000000000000000000000000000000000000000000000000000000c",
+    "note": "OFFLINE ONLY: placeholder target, not a deployed contract. Valid TestOnlyCounter ABI calldata for validation/calldata preparation; never use this example as a live plan."
+  }
+]

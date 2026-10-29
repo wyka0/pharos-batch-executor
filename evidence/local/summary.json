@@ -1,0 +1,358 @@
+{
+  "classification": "REAL LOCAL EVM ONLY — NOT ATLANTIC. All assertions passed.",
+  "runId": "local_2026-10-29T06-48-37-162Z_e3a049ac",
+  "chainId": 31337,
+  "sender": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
+  "executor": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+  "testOnlyTarget": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+  "setupTransactions": 2,
+  "baselineTransactions": 6,
+  "demonstrationBatchTransactions": 5,
+  "refundWithdrawalTransactions": 1,
+  "totalSubmittedLocalTransactions": 14,
+  "baselineMethod": "LOCAL identical-state snapshot experiment: 6 real individual receipts captured before evm_revert, then 1 real batch from the restored block/state root. Baseline branch hashes are removed and are not current canonical-chain or Atlantic proof.",
+  "restoredStateRoot": "0xb54c32d02b077e50d093ab1cbebcb84f519c88c452040ddbe173630530c84f9f",
+  "restoredBlockHash": "0xee5c7d01b078c7c166fa81e80a83862ed4f952d72917a988e5d5cc153aea9c4c",
+  "comparison": {
+    "individual": {
+      "transactionCount": 6,
+      "estimatedGas": {
+        "gas": "273942",
+        "estimate": true,
+        "source": "rpc"
+      },
+      "measuredGas": {
+        "gas": "273942",
+        "measured": true,
+        "receipts": 6
+      }
+    },
+    "batch": {
+      "transactionCount": 1,
+      "estimatedGas": {
+        "gas": "1087905",
+        "estimate": true,
+        "source": "rpc"
+      },
+      "measuredGas": {
+        "gas": "235910",
+        "measured": true,
+        "receipts": 1
+      }
+    },
+    "transactionReduction": {
+      "count": 5,
+      "fraction": 0.8333333333333334
+    },
+    "baselineMethod": "LOCAL identical-state snapshot experiment: 6 real individual receipts captured before evm_revert, then 1 real batch from the restored block/state root. Baseline branch hashes are removed and are not current canonical-chain or Atlantic proof.",
+    "limitations": [
+      "Gas estimates are not measured usage. The executor reserves gas for every action, so the batch estimate can exceed actual gas used.",
+      "Targets see the executor as msg.sender. Sender-dependent operations and dependent approve/swap/claim workflows are unsupported.",
+      "Deployment, baseline experiments and refund withdrawals are separate transactions and excluded from per-batch execution counts.",
+      "CALL success does not prove application postconditions or interpret a token return value of false."
+    ],
+    "estimatedSavings": {
+      "gas": "-813963",
+      "fraction": -2.971296
+    },
+    "measuredSavings": {
+      "gas": "38032",
+      "fraction": 0.138832
+    }
+  },
+  "scenarios": [
+    {
+      "runId": "local_2026-10-29T06-48-37-162Z_e3a049ac_success",
+      "transactionHash": "0xc2722caa43ae17e547544d4792da3fda8a49b6afad9caf702691f4be087d63ca",
+      "receipt": {
+        "evidence": "actual",
+        "txHash": "0xc2722caa43ae17e547544d4792da3fda8a49b6afad9caf702691f4be087d63ca",
+        "status": "success",
+        "gasUsed": "235910",
+        "blockNumber": "3",
+        "blockHash": "0x85b70ad2ead6ea4191ec30c5700c73027e00cfaf6d8e278f2437b4087a6753c8",
+        "effectiveGasPrice": "1347669412",
+        "feeWei": "317928690984920",
+        "confirmations": "1"
+      },
+      "outcomes": [
+        {
+          "id": "independent-0",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "independent-1",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "independent-2",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "independent-3",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "independent-4",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "independent-5",
+          "success": true,
+          "truncated": false
+        }
+      ]
+    },
+    {
+      "runId": "local_2026-10-29T06-48-37-162Z_e3a049ac_mixed",
+      "transactionHash": "0x8e084a54249e3dcdce54a5993457080ad2b930c7ff1f33da87e6a57bf4c6c177",
+      "receipt": {
+        "evidence": "actual",
+        "txHash": "0x8e084a54249e3dcdce54a5993457080ad2b930c7ff1f33da87e6a57bf4c6c177",
+        "status": "success",
+        "gasUsed": "108509",
+        "blockNumber": "4",
+        "blockHash": "0x01f73bc1bc5fa87197378cdb841295fdd5cea2517a7d26a7291475fd43b6e5ad",
+        "effectiveGasPrice": "1304894225",
+        "feeWei": "141592767460525",
+        "confirmations": "1"
+      },
+      "outcomes": [
+        {
+          "id": "mixed-before",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "forced-failure",
+          "success": false,
+          "error": "TestOnly: forced failure",
+          "truncated": false
+        },
+        {
+          "id": "mixed-after",
+          "success": true,
+          "truncated": false
+        }
+      ]
+    },
+    {
+      "runId": "local_2026-10-29T06-48-37-162Z_e3a049ac_gas-isolation",
+      "transactionHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+      "receipt": {
+        "evidence": "actual",
+        "txHash": "0xfe9d70d5caed72256d32f16febae4b52779ff18664b501faeb706dec81afff14",
+        "status": "success",
+        "gasUsed": "131539",
+        "blockNumber": "5",
+        "blockHash": "0x0dedf910c996fb5e0fd3b0efbed95a8d807b58671c4c9438d0e7f83a1c0da652",
+        "effectiveGasPrice": "1267058145",
+        "feeWei": "166667561335155",
+        "confirmations": "1"
+      },
+      "outcomes": [
+        {
+          "id": "gas-isolation-before",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "gas-exhaustion",
+          "success": false,
+          "error": "call reverted or exhausted its gas limit without revert data",
+          "truncated": false
+        },
+        {
+          "id": "gas-isolation-after",
+          "success": true,
+          "truncated": false
+        }
+      ]
+    },
+    {
+      "runId": "local_2026-10-29T06-48-37-162Z_e3a049ac_return-cap",
+      "transactionHash": "0xc9daab6d04b68ea8c7be5562e90b996d3d298f06228f8a653c63bef53da1d897",
+      "receipt": {
+        "evidence": "actual",
+        "txHash": "0xc9daab6d04b68ea8c7be5562e90b996d3d298f06228f8a653c63bef53da1d897",
+        "status": "success",
+        "gasUsed": "181606",
+        "blockNumber": "6",
+        "blockHash": "0x4b03c964663b78c5bd4ea16c6d0805c00004ef529ee3d6242c29203d8fe669d6",
+        "effectiveGasPrice": "1233968615",
+        "feeWei": "224096104295690",
+        "confirmations": "1"
+      },
+      "outcomes": [
+        {
+          "id": "return-cap-before",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "large-return",
+          "success": true,
+          "truncated": true
+        },
+        {
+          "id": "return-cap-after",
+          "success": true,
+          "truncated": false
+        }
+      ]
+    },
+    {
+      "runId": "local_2026-10-29T06-48-37-162Z_e3a049ac_refund-credit",
+      "transactionHash": "0xdd32955860e82fc550805e22bff774556c6aabe20b60d79535b53de6305b792c",
+      "receipt": {
+        "evidence": "actual",
+        "txHash": "0xdd32955860e82fc550805e22bff774556c6aabe20b60d79535b53de6305b792c",
+        "status": "success",
+        "gasUsed": "137127",
+        "blockNumber": "7",
+        "blockHash": "0x68db073b9b83faa8be7e07eea5531b0c448b5217c6721b944e8e03ac4abf6082",
+        "effectiveGasPrice": "1205076623",
+        "feeWei": "165248542082121",
+        "confirmations": "1"
+      },
+      "outcomes": [
+        {
+          "id": "refund-credit-before",
+          "success": true,
+          "truncated": false
+        },
+        {
+          "id": "failed-value",
+          "success": false,
+          "error": "call reverted or exhausted its gas limit without revert data",
+          "truncated": false
+        },
+        {
+          "id": "refund-credit-after",
+          "success": true,
+          "truncated": false
+        }
+      ]
+    }
+  ],
+  "deploymentReceipts": [
+    {
+      "name": "BatchExecutor",
+      "address": "0x5FbDB2315678afecb367f032d93F642f64180aa3",
+      "receipt": {
+        "evidence": "actual",
+        "txHash": "0x9c7dbc939898b77654879f3cccc4841410a54f41ab753e708a105e8bee79d865",
+        "status": "success",
+        "gasUsed": "740669",
+        "blockNumber": "1",
+        "blockHash": "0x77589fb5effcb3cfffefc31a809c4103027d9b9aa72263aec5f5d76b3d2f80be",
+        "effectiveGasPrice": "2000000000",
+        "feeWei": "1481338000000000",
+        "confirmations": "1"
+      },
+      "rawReceipt": {
+        "type": "legacy",
+        "status": "success",
+        "cumulativeGasUsed": "740669",
+        "logs": [],
+        "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "transactionHash": "0x9c7dbc939898b77654879f3cccc4841410a54f41ab753e708a105e8bee79d865",
+        "transactionIndex": 0,
+        "blockHash": "0x77589fb5effcb3cfffefc31a809c4103027d9b9aa72263aec5f5d76b3d2f80be",
+        "blockNumber": "1",
+        "gasUsed": "740669",
+        "effectiveGasPrice": "2000000000",
+        "blobGasPrice": "1",
+        "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        "to": null,
+        "contractAddress": "0x5fbdb2315678afecb367f032d93f642f64180aa3"
+      },
+      "bytecodeHash": "0x8c04e77b66f8cb6b7dd4cf949ec54b511a1092ba0dc99593877ca3ea92b972eb"
+    },
+    {
+      "name": "TestOnlyCounter",
+      "address": "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
+      "receipt": {
+        "evidence": "actual",
+        "txHash": "0x72c383ef9d2828d52575f2884648785a8761de8cb722e1104b51bab06b0a15c7",
+        "status": "success",
+        "gasUsed": "221814",
+        "blockNumber": "2",
+        "blockHash": "0xee5c7d01b078c7c166fa81e80a83862ed4f952d72917a988e5d5cc153aea9c4c",
+        "effectiveGasPrice": "1881172242",
+        "feeWei": "417270339686988",
+        "confirmations": "1"
+      },
+      "rawReceipt": {
+        "type": "legacy",
+        "status": "success",
+        "cumulativeGasUsed": "221814",
+        "logs": [],
+        "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "transactionHash": "0x72c383ef9d2828d52575f2884648785a8761de8cb722e1104b51bab06b0a15c7",
+        "transactionIndex": 0,
+        "blockHash": "0xee5c7d01b078c7c166fa81e80a83862ed4f952d72917a988e5d5cc153aea9c4c",
+        "blockNumber": "2",
+        "gasUsed": "221814",
+        "effectiveGasPrice": "1881172242",
+        "blobGasPrice": "1",
+        "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+        "to": null,
+        "contractAddress": "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512"
+      },
+      "bytecodeHash": "0x608a2195c505f04c57096de00ddbac838846f3d3911d24913b3cf64c7a4bd4d3"
+    }
+  ],
+  "withdrawal": {
+    "receipt": {
+      "evidence": "actual",
+      "txHash": "0xda8b4c09ffd569c8683b16657b74e586d56ebf07629ec2fe7079783045181bf6",
+      "status": "success",
+      "gasUsed": "33387",
+      "blockNumber": "8",
+      "blockHash": "0x1196b550c4f1863f8b7e79c24d803f828dd9e08e08be75b1134f88e288126781",
+      "effectiveGasPrice": "1179676392",
+      "feeWei": "39385855699704",
+      "confirmations": "1"
+    },
+    "rawReceipt": {
+      "type": "legacy",
+      "status": "success",
+      "cumulativeGasUsed": "33387",
+      "logs": [
+        {
+          "address": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+          "topics": [
+            "0xd55b5fe81317b854ac11454adf7e5a9a0adf69184d643ef9ae6bfda6a015c5bc",
+            "0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+            "0x000000000000000000000000f39fd6e51aad88f6f4ce6ab8827279cfffb92266"
+          ],
+          "data": "0x00000000000000000000000000000000000000000000000000000000000003e8",
+          "blockHash": "0x1196b550c4f1863f8b7e79c24d803f828dd9e08e08be75b1134f88e288126781",
+          "blockNumber": "8",
+          "blockTimestamp": "1793256521",
+          "transactionHash": "0xda8b4c09ffd569c8683b16657b74e586d56ebf07629ec2fe7079783045181bf6",
+          "transactionIndex": 0,
+          "logIndex": 0,
+          "removed": false
+        }
+      ],
+      "logsBloom": "0x00000000000000000000000000000000000000000000080000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000040000000000000000100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000000020040000000200000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      "transactionHash": "0xda8b4c09ffd569c8683b16657b74e586d56ebf07629ec2fe7079783045181bf6",
+      "transactionIndex": 0,
+      "blockHash": "0x1196b550c4f1863f8b7e79c24d803f828dd9e08e08be75b1134f88e288126781",
+      "blockNumber": "8",
+      "gasUsed": "33387",
+      "effectiveGasPrice": "1179676392",
+      "blobGasPrice": "1",
+      "from": "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266",
+      "to": "0x5fbdb2315678afecb367f032d93f642f64180aa3",
+      "contractAddress": null
+    }
+  }
+}
