@@ -99,9 +99,13 @@ local Foundry cache.
 Offline production smoke checks also verify compiled CLI behavior, portable
 declarations and the SHA-256 manifest of the saved local proof.
 
-`npm run demo:local` is a separate, explicitly approved loopback deployment/demo,
-not part of `verify`. It would create **new current-source** receipts, not reproduce
-or replace the frozen proof. Do not run it during offline-only hardening.
+`npm run demo:local` is separate from `npm run verify`; GitHub Actions invokes it
+as an additional CI step. Invoking the command directly starts a disposable Anvil
+on a random loopback port (chain 31337), uses Anvil's public unlocked test account
+without loading a private key, deploys and exercises the current contracts, writes
+new ignored evidence under `evidence/runs/`, and stops its own process. It has no
+interactive approval prompt or plan-hash gate, never targets Atlantic or another
+public network, and does not reproduce or replace the frozen proof.
 
 ## Action format
 

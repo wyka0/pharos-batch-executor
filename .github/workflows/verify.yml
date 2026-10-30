@@ -18,6 +18,18 @@ jobs:
         with:
           version: v1.2.3
       - run: npm ci
+      - name: Prepare pinned Solidity 0.8.24 compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! forge build --use 0.8.24 --force; then
+            echo "::error::Failed to download or compile with pinned Solidity 0.8.24."
+            exit 1
+          fi
+          if ! forge build --offline --use 0.8.24 --force; then
+            echo "::error::Pinned Solidity 0.8.24 was not available from the Foundry cache after preparation."
+            exit 1
+          fi
       - run: npm run verify
       - run: npm run demo:local
       - run: npm audit --audit-level=low
