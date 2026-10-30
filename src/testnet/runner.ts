@@ -4,7 +4,7 @@ import type { EvmPublicClient } from '../adapters/evm.js';
 import { EvmAdapter } from '../adapters/evm.js';
 import { loadArtifact, type ContractArtifact } from '../artifacts.js';
 import { assertAuthorizedCaller } from '../caller.js';
-import { ExecutionGateError } from '../errors.js';
+import { ExecutionGateError, type PreConsumptionErrorCode, type SafeExecutionGateCause } from '../errors.js';
 import { ATLANTIC } from '../network.js';
 import type { ReceiptLike } from '../receipt.js';
 import type { ActionResult, ActualReceipt, ExecutionComparison } from '../types.js';
@@ -67,26 +67,40 @@ export async function executeApprovedPlan(
   // Neither a caller nor an async signer can mutate the approved plan in flight.
   const plan = freezePlan(structuredClone(inputPlan));
   const now = deps.now ?? Date.now;
-  verifyApproval(plan, approvalHash, confirmed, now());
+  verifyApprovalGuard(plan, approvalHash, confirmed, now(), 'PLAN_VALIDATION_FAILED', 'INITIAL_APPROVAL');
   const hash = broadcastPlanHash(plan);
-  deps.journal.assertPlan(plan);
-  if (path.relative(deps.journal.directory, deps.deployments.directory) !== '') throw new ExecutionGateError('Journal and deployment records must share one durable state directory.');
+  try { deps.journal.assertPlan(plan); }
+  catch (error) { throw codedGateError(error, 'PLAN_VALIDATION_FAILED', 'JOURNAL_PLAN_BINDING', 'Journal plan binding failed.'); }
+  if (path.relative(deps.journal.directory, deps.deployments.directory) !== '') throw new ExecutionGateError('Journal and deployment records must share one durable state directory.', {
+    code: 'INTERNAL_PRECONSUMPTION_FAILURE', safeCause: 'STATE_DIRECTORY_BINDING',
+  });
   const artifacts = await artifactBindings(plan, deps.artifactLoader ?? loadArtifact);
   let signer: TestnetSigner;
   try {
-    await deps.deployments.verifyPrerequisites(plan, deps.client, deps.artifactLoader);
-    if (plan.purpose === 'deploy') await deps.deployments.assertAvailable(plan.sender, plan.deploymentStage!);
-    await preflight(plan, deps.client, artifacts);
+    try { await deps.deployments.verifyPrerequisites(plan, deps.client, deps.artifactLoader); }
+    catch (error) { throw codedGateError(error, 'PREREQUISITE_VERIFICATION_FAILED', 'DEPLOYMENT_PREREQUISITE', 'Deployment prerequisite verification failed.'); }
+    if (plan.purpose === 'deploy') {
+      try { await deps.deployments.assertAvailable(plan.sender, plan.deploymentStage!); }
+      catch (error) { throw codedGateError(error, 'INTERNAL_PRECONSUMPTION_FAILURE', 'DEPLOYMENT_STAGE_AVAILABILITY', 'Deployment stage availability check failed.'); }
+    }
+    try { await preflight(plan, deps.client, artifacts); }
+    catch (error) { throw codedGateError(error, 'RPC_PREFLIGHT_FAILED', 'RPC_STATE_READ', 'Read-only RPC preflight failed.'); }
     // Load and validate the explicitly selected signer before consuming approval
     // or creating any durable stage/transaction intent.
-    verifyApproval(plan, approvalHash, confirmed, now());
-    signer = await deps.signerLoader();
-    if (signer.address.toLowerCase() !== plan.sender.toLowerCase()) throw new ExecutionGateError('Validated signer does not match the approved sender.');
-    verifyApproval(plan, approvalHash, confirmed, now());
-    await deps.journal.acquire(plan.sender, plan.transactions.map((tx) => tx.nonce));
+    verifyApprovalGuard(plan, approvalHash, confirmed, now(), 'PLAN_VALIDATION_FAILED', 'INITIAL_APPROVAL');
+    try { signer = await deps.signerLoader(); }
+    catch (error) { throw codedGateError(error, 'SIGNER_SOURCE_FAILED', 'SIGNER_FILE_OR_FORMAT', 'Signer source validation failed.'); }
+    if (signer.address.toLowerCase() !== plan.sender.toLowerCase()) throw new ExecutionGateError('Validated signer does not match the approved sender.', {
+      code: 'SIGNER_ADDRESS_MISMATCH', safeCause: 'SIGNER_PUBLIC_ADDRESS',
+    });
+    verifyApprovalGuard(plan, approvalHash, confirmed, now(), 'APPROVAL_EXPIRED_AFTER_SIGNER_LOAD', 'POST_SIGNER_APPROVAL');
+    try { await deps.journal.acquire(plan.sender, plan.transactions.map((tx) => tx.nonce)); }
+    catch (error) { throw codedGateError(error, 'INTERNAL_PRECONSUMPTION_FAILURE', 'PLAN_OR_SENDER_LOCK', 'Durable-state acquisition failed.'); }
   } catch (error) {
     if (error instanceof ExecutionGateError) throw error;
-    throw new ExecutionGateError('Read-only preflight, signer validation or durable-state acquisition failed; no signing or submission attempted.');
+    throw new ExecutionGateError('Read-only preflight, signer validation or durable-state acquisition failed; no signing or submission attempted.', {
+      code: 'INTERNAL_PRECONSUMPTION_FAILURE', safeCause: 'UNKNOWN_PRECONSUMPTION',
+    });
   }
   const evidence: TestnetExecutionEvidence = {
     schemaVersion: 1, classification: 'ATLANTIC TESTNET', planHash: hash, plan,
@@ -243,15 +257,39 @@ export async function executeApprovedPlan(
   } finally { await deps.journal.release(); }
 }
 
+function codedGateError(
+  error: unknown, code: PreConsumptionErrorCode, safeCause: SafeExecutionGateCause, safeMessage: string,
+): ExecutionGateError {
+  if (error instanceof ExecutionGateError && error.code !== undefined) return error;
+  return new ExecutionGateError(error instanceof ExecutionGateError ? error.message : safeMessage, { code, safeCause });
+}
+
+function verifyApprovalGuard(
+  plan: BroadcastPlan, approvalHash: string, confirmed: boolean, now: number,
+  code: PreConsumptionErrorCode, safeCause: SafeExecutionGateCause,
+): void {
+  try { verifyApproval(plan, approvalHash, confirmed, now); }
+  catch (error) { throw codedGateError(error, code, safeCause, 'Approved plan validation failed.'); }
+}
+
 async function artifactBindings(plan: BroadcastPlan, loader: typeof loadArtifact) {
-  const executor = await loader('BatchExecutor');
-  const target = await loader('TestOnlyCounter');
+  let executor: ContractArtifact;
+  let target: ContractArtifact;
+  try {
+    executor = await loader('BatchExecutor');
+    target = await loader('TestOnlyCounter');
+  }
+  catch (error) { throw codedGateError(error, 'ARTIFACT_BINDING_FAILED', 'SOURCE_ARTIFACT_BINDING', 'Source-bound artifact loading failed.'); }
   const artifacts = { BatchExecutor: executor, TestOnlyCounter: target };
   if (plan.purpose === 'deploy') for (const tx of plan.transactions) {
     const artifact = artifacts[tx.artifactName!];
-    if (tx.data !== artifact.bytecode || tx.expectedRuntimeCodeHash !== artifact.runtimeCodeHash) throw new ExecutionGateError('Approved deployment differs from the source-bound build artifacts.');
+    if (tx.data !== artifact.bytecode || tx.expectedRuntimeCodeHash !== artifact.runtimeCodeHash) throw new ExecutionGateError('Approved deployment differs from the source-bound build artifacts.', {
+      code: 'ARTIFACT_BINDING_FAILED', safeCause: 'SOURCE_ARTIFACT_BINDING',
+    });
   }
-  else if (plan.executorRuntimeCodeHash !== executor.runtimeCodeHash) throw new ExecutionGateError('Approved executor differs from the source-bound artifact.');
+  else if (plan.executorRuntimeCodeHash !== executor.runtimeCodeHash) throw new ExecutionGateError('Approved executor differs from the source-bound artifact.', {
+    code: 'ARTIFACT_BINDING_FAILED', safeCause: 'SOURCE_ARTIFACT_BINDING',
+  });
   return artifacts;
 }
 
@@ -262,45 +300,69 @@ async function preflight(plan: BroadcastPlan, client: RunnerReadClient, artifact
 }
 
 async function freshEstimate(plan: BroadcastPlan, tx: PlannedTransaction, client: EvmPublicClient) {
-  const gas = await client.estimateGas({ account: plan.sender, type: tx.type, nonce: tx.nonce, gasPrice: decimal(plan.gasPriceWei),
-    ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: decimal(tx.valueWei), gas: decimal(tx.gasLimit) });
-  if (gas > decimal(tx.gasLimit)) throw new ExecutionGateError('Fresh gas estimate exceeds approved bound.');
+  let gas: bigint;
+  try { gas = await client.estimateGas({ account: plan.sender, type: tx.type, nonce: tx.nonce, gasPrice: decimal(plan.gasPriceWei),
+    ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: decimal(tx.valueWei), gas: decimal(tx.gasLimit) }); }
+  catch { throw new ExecutionGateError('Fresh gas estimate failed.', { code: 'FRESH_ESTIMATE_FAILED', safeCause: 'RPC_FRESH_ESTIMATE' }); }
+  if (gas > decimal(tx.gasLimit)) throw new ExecutionGateError('Fresh gas estimate exceeds approved bound.', {
+    code: 'FRESH_ESTIMATE_FAILED', safeCause: 'RPC_FRESH_ESTIMATE',
+  });
 }
 
 async function assertSimulation(plan: BroadcastPlan, client: EvmPublicClient, artifact: ContractArtifact) {
   const adapter = new EvmAdapter({ id: 'atlantic-testnet', rpcUrl: ATLANTIC.rpcUrl, account: plan.sender,
     batchExecutor: plan.batchExecutor!, expectedExecutorCodeHash: artifact.runtimeCodeHash, publicClient: client });
   const simulation = await adapter.simulateBatch(validateActions(plan.actions));
-  if (simulation.state !== 'dry_run') throw new ExecutionGateError('Fresh simulation failed before signing.');
+  if (simulation.state !== 'dry_run') throw new ExecutionGateError('Fresh simulation failed before signing.', {
+    code: 'RPC_PREFLIGHT_FAILED', safeCause: 'RPC_SIMULATION',
+  });
   const outcomes = simulation.actions.map((a) => ({ id: a.id, success: a.success, returnData: a.returnData, returnDataSize: a.returnDataSize?.toString() }));
-  if (canonicalJson(outcomes) !== canonicalJson(plan.expectedSimulation)) throw new ExecutionGateError('Fresh action outcomes differ from the approved simulation.');
+  if (canonicalJson(outcomes) !== canonicalJson(plan.expectedSimulation)) throw new ExecutionGateError('Fresh action outcomes differ from the approved simulation.', {
+    code: 'RPC_PREFLIGHT_FAILED', safeCause: 'RPC_SIMULATION',
+  });
 }
 
 async function beforeStep(plan: BroadcastPlan, index: number, client: RunnerReadClient) {
-  if (await client.getChainId() !== ATLANTIC.chainId) throw new ExecutionGateError('RPC chain changed; refused.');
+  if (await client.getChainId() !== ATLANTIC.chainId) throw new ExecutionGateError('RPC chain changed; refused.', {
+    code: 'RPC_PREFLIGHT_FAILED', safeCause: 'RPC_CHAIN_ID',
+  });
   const [pending, latest, balance, gasPrice, blockNumber] = await Promise.all([
     client.getTransactionCount({ address: plan.sender, blockTag: 'pending' }),
     client.getTransactionCount({ address: plan.sender, blockTag: 'latest' }),
     client.getBalance({ address: plan.sender }), client.getGasPrice(), client.getBlockNumber(),
   ]);
-  if (pending !== plan.transactions[index]!.nonce || pending !== latest) throw new ExecutionGateError('Nonce changed or wallet has an unresolved pending transaction.');
+  if (pending !== plan.transactions[index]!.nonce || pending !== latest) throw new ExecutionGateError('Nonce changed or wallet has an unresolved pending transaction.', {
+    code: 'NONCE_CONFLICT', safeCause: 'RPC_NONCE',
+  });
   const senderCode = await client.getCode({ address: plan.sender });
-  if (senderCode !== undefined && senderCode !== '0x') throw new ExecutionGateError('Reviewed direct-wallet sender is no longer code-empty.');
-  if (gasPrice > decimal(plan.gasPriceWei)) throw new ExecutionGateError('Gas price is above the explicitly approved price.');
+  if (senderCode !== undefined && senderCode !== '0x') throw new ExecutionGateError('Reviewed direct-wallet sender is no longer code-empty.', {
+    code: 'RPC_PREFLIGHT_FAILED', safeCause: 'RPC_SENDER_CODE',
+  });
+  if (gasPrice > decimal(plan.gasPriceWei)) throw new ExecutionGateError('Gas price is above the explicitly approved price.', {
+    code: 'GAS_PRICE_EXCEEDED', safeCause: 'RPC_GAS_PRICE',
+  });
   const remaining = plan.transactions.slice(index).reduce((sum, tx) => sum + decimal(tx.gasLimit) * decimal(plan.gasPriceWei) + decimal(tx.valueWei), 0n);
-  if (balance < remaining) throw new ExecutionGateError('Insufficient balance for remaining approved gas/value ceiling.');
+  if (balance < remaining) throw new ExecutionGateError('Insufficient balance for remaining approved gas/value ceiling.', {
+    code: 'BALANCE_INSUFFICIENT', safeCause: 'RPC_BALANCE',
+  });
   const block = await client.getBlock({ blockNumber });
-  if (plan.transactions.slice(index).some((tx) => decimal(tx.gasLimit) > block.gasLimit)) throw new ExecutionGateError('Approved transaction exceeds current block gas limit.');
+  if (plan.transactions.slice(index).some((tx) => decimal(tx.gasLimit) > block.gasLimit)) throw new ExecutionGateError('Approved transaction exceeds current block gas limit.', {
+    code: 'RPC_PREFLIGHT_FAILED', safeCause: 'RPC_BLOCK_LIMIT',
+  });
   if (plan.purpose === 'deploy') {
     const address = plan.transactions[index]!.expectedContractAddress!;
     const [code, nonce] = await Promise.all([client.getCode({ address }), client.getTransactionCount({ address, blockTag: 'latest' })]);
-    if ((code !== undefined && code !== '0x') || nonce !== 0) throw new ExecutionGateError('Predicted CREATE destination is occupied; no duplicate deployment.');
+    if ((code !== undefined && code !== '0x') || nonce !== 0) throw new ExecutionGateError('Predicted CREATE destination is occupied; no duplicate deployment.', {
+      code: 'CREATE_ADDRESS_OCCUPIED', safeCause: 'RPC_CREATE_OCCUPANCY',
+    });
   }
   if (plan.targetCodeHashes) for (const [address, hash] of Object.entries(plan.targetCodeHashes)) {
-    if (keccak256((await client.getCode({ address: address as Address })) ?? '0x') !== hash) throw new ExecutionGateError('Target code changed since approval.');
+    if (keccak256((await client.getCode({ address: address as Address })) ?? '0x') !== hash) throw new ExecutionGateError('Target code changed since approval.', {
+      code: 'RPC_PREFLIGHT_FAILED', safeCause: 'RPC_TARGET_BINDING',
+    });
   }
   if (plan.batchExecutor !== undefined && keccak256((await client.getCode({ address: plan.batchExecutor })) ?? '0x') !== plan.executorRuntimeCodeHash) {
-    throw new ExecutionGateError('Executor code changed since approval.');
+    throw new ExecutionGateError('Executor code changed since approval.', { code: 'RPC_PREFLIGHT_FAILED', safeCause: 'RPC_TARGET_BINDING' });
   }
   if (plan.batchExecutor !== undefined) await assertAuthorizedCaller(client, plan.batchExecutor, plan.sender);
 }

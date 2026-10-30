@@ -47,7 +47,9 @@ export class DeploymentStore {
 
   async assertAvailable(sender: Address, stage: DeploymentStage): Promise<void> {
     if (await readPublicJson(this.recordFile(sender, stage), true) !== undefined || await readPublicJson(this.file(sender, stage, 'intent'), true) !== undefined) {
-      throw new ExecutionGateError('This deployment stage already has a record or intent. Reconcile the original plan; never redeploy it at another nonce.');
+      throw new ExecutionGateError('This deployment stage already has a record or intent. Reconcile the original plan; never redeploy it at another nonce.', {
+        code: 'STAGE_ALREADY_CLAIMED', safeCause: 'DEPLOYMENT_STAGE_AVAILABILITY',
+      });
     }
   }
 
@@ -95,14 +97,18 @@ export class DeploymentStore {
       if (code === undefined || keccak256(code) !== artifact.runtimeCodeHash) throw new Error('current runtime');
       if (stage === 'executor') await assertAuthorizedCaller(client, record.address, sender);
       return record;
-    } catch { throw new ExecutionGateError('Required deployment is missing, changed or not canonically verified. Reconcile its original plan before continuing.'); }
+    } catch { throw new ExecutionGateError('Required deployment is missing, changed or not canonically verified. Reconcile its original plan before continuing.', {
+      code: 'PREREQUISITE_VERIFICATION_FAILED', safeCause: 'DEPLOYMENT_PREREQUISITE',
+    }); }
   }
 
   async prerequisites(sender: Address, stages: readonly DeploymentStage[], client: ReconcileClient, expected?: BroadcastPlan['deploymentPrerequisites'], artifactLoader = loadArtifact): Promise<NonNullable<BroadcastPlan['deploymentPrerequisites']>> {
     const bindings: NonNullable<BroadcastPlan['deploymentPrerequisites']> = {};
     for (const stage of stages) {
       const record = await this.verify(sender, stage, client, expected?.[stage], artifactLoader);
-      if (stage === 'counter' && canonicalJson(record.plan.deploymentPrerequisites?.executor) !== canonicalJson(bindings.executor)) throw new ExecutionGateError('Counter was not approved against this executor deployment record.');
+      if (stage === 'counter' && canonicalJson(record.plan.deploymentPrerequisites?.executor) !== canonicalJson(bindings.executor)) throw new ExecutionGateError('Counter was not approved against this executor deployment record.', {
+        code: 'PREREQUISITE_VERIFICATION_FAILED', safeCause: 'DEPLOYMENT_PREREQUISITE',
+      });
       bindings[stage] = deploymentBinding(record);
     }
     return bindings;
@@ -113,7 +119,9 @@ export class DeploymentStore {
     await this.prerequisites(plan.sender, stages, client, plan.deploymentPrerequisites, artifactLoader);
     for (const stage of stages) {
       const record = await this.read(plan.sender, stage);
-      if (Date.parse(plan.createdAt) < Date.parse(record.verifiedAt) || plan.transactions[0]!.nonce <= record.plan.transactions[0]!.nonce) throw new ExecutionGateError('This approval predates its verified prerequisite or reuses an earlier nonce. Prepare a fresh plan.');
+      if (Date.parse(plan.createdAt) < Date.parse(record.verifiedAt) || plan.transactions[0]!.nonce <= record.plan.transactions[0]!.nonce) throw new ExecutionGateError('This approval predates its verified prerequisite or reuses an earlier nonce. Prepare a fresh plan.', {
+        code: 'PREREQUISITE_VERIFICATION_FAILED', safeCause: 'DEPLOYMENT_PREREQUISITE',
+      });
     }
   }
 

@@ -48,23 +48,31 @@ export class ExecutionJournal {
         try { await handle.writeFile(JSON.stringify({ schemaVersion: 2, pid: process.pid, host: hostname(), planHash: this.planHash, token: this.lockToken })); await handle.sync(); } finally { await handle.close(); }
       }
       this.sender = sender;
-      if ((await this.read()).length !== 0) throw new ExecutionGateError('This plan already has an execution intent. Reconcile existing hashes; never retry the plan.');
-      if (await this.readApprovalState() !== 'UNUSED') throw new ExecutionGateError('This approval was already consumed. Reconcile; do not reuse it.');
+      if ((await this.read()).length !== 0) throw new ExecutionGateError('This plan already has an execution intent. Reconcile existing hashes; never retry the plan.', {
+        code: 'NONCE_RESERVATION_EXISTS', safeCause: 'NONCE_MARKER_OR_RESERVATION',
+      });
+      if (await this.readApprovalState() !== 'UNUSED') throw new ExecutionGateError('This approval was already consumed. Reconcile; do not reuse it.', {
+        code: 'NONCE_RESERVATION_EXISTS', safeCause: 'NONCE_MARKER_OR_RESERVATION',
+      });
       for (const nonce of nonces) {
         for (const file of [this.intentFile(nonce), this.reservationFile(nonce)]) {
           try { await stat(file); }
           catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue; throw error; }
-          throw new ExecutionGateError('This sender/nonce already has an intent or approval reservation. Reconcile; do not create a replacement plan to retry.');
+          throw new ExecutionGateError('This sender/nonce already has an intent or approval reservation. Reconcile; do not create a replacement plan to retry.', {
+            code: 'NONCE_RESERVATION_EXISTS', safeCause: 'NONCE_MARKER_OR_RESERVATION',
+          });
         }
       }
     } catch (error) {
       await this.release();
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new ExecutionGateError('Execution lock exists; reconcile instead of resubmitting or deleting locks blindly.');
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new ExecutionGateError('Execution lock exists; reconcile instead of resubmitting or deleting locks blindly.', {
+        code: 'EXECUTION_LOCK_EXISTS', safeCause: 'PLAN_OR_SENDER_LOCK',
+      });
       throw error;
     }
   }
 
-  /** Consumes explicit approval durably BEFORE key loading, even if signing fails. */
+  /** Consumes approval only after read-only preflight and signer identity validation. */
   async claimApproval(plan: BroadcastPlan, at: string): Promise<void> {
     this.assertPlan(plan);
     if (this.ownedLocks.length === 0 || this.sender?.toLowerCase() !== plan.sender.toLowerCase()) throw new ExecutionGateError('Sender lock required before approval consumption.');

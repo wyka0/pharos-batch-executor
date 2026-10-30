@@ -29,6 +29,10 @@ guardrails, not a promise of complete safety for arbitrary targets.
 - The signer checks the public sender, signs offline, and the runner independently
   checks recovered sender/chain/nonce/to/data/value/gas/price before any intent.
   Signed bytes stay in memory; signing/submission exception objects are never logged.
+- A pre-consumption refusal prints only a stable categorical code and the generic
+  refusal text. Raw RPC, filesystem and signer exceptions, static internal cause
+  labels and configuration values are never printed. Unknown failures map to
+  `INTERNAL_PRECONSUMPTION_FAILURE`; they never become success.
 - After post-sign checks, journal fsync and public-evidence persistence, a final
   **synchronous** approval check runs immediately before `sendRawTransaction`,
   with no intervening await. A deadline reached there produces terminal

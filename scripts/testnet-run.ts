@@ -8,6 +8,7 @@ import { ExecutionJournal } from '../src/testnet/journal.js';
 import { atlanticPublicClient } from '../src/testnet/readiness.js';
 import { executeApprovedPlan } from '../src/testnet/runner.js';
 import { DeploymentStore } from '../src/testnet/deployments.js';
+import { publicRunnerRefusal } from '../src/testnet/diagnostics.js';
 import { readPublicJson } from '../src/testnet/public-files.js';
 
 async function main() {
@@ -41,9 +42,9 @@ async function main() {
     comparison: result.comparison }));
   if (result.state !== 'CONFIRMED') process.exitCode = 1;
 }
-main().catch(() => {
+main().catch((error: unknown) => {
   // Never print a signing/submission exception: it may carry a raw signed
-  // payload. Public evidence + journal preserve hashes and safe error labels.
-  console.error('Testnet runner stopped/refused. Inspect the public plan, journal and execution evidence. Do not resend an intent or unknown transaction.');
+  // payload. Only the static categorical code is exposed.
+  console.error(publicRunnerRefusal(error));
   process.exitCode = 1;
 });

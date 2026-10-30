@@ -384,7 +384,7 @@ describe('staged, separately approved deployments (offline simulation only)', ()
     const run = h.run(plan, (deps) => {
       deps.signerLoader = async () => { throw new Error('simulated missing signing configuration'); };
     });
-    await expect(run.execute()).rejects.toThrow(/signer validation/);
+    await expect(run.execute()).rejects.toThrow(/Signer source validation/);
     expect(h.chain.client.sendRawTransaction).not.toHaveBeenCalled();
     expect(await run.journal.readApprovalState()).toBe('UNUSED');
     expect(await run.journal.read()).toEqual([]);
@@ -401,7 +401,7 @@ describe('staged, separately approved deployments (offline simulation only)', ()
     });
     let message = '';
     try { await run.execute(); } catch (error) { message = error instanceof Error ? error.message : String(error); }
-    expect(message).toMatch(/signer validation/);
+    expect(message).toMatch(/Signer source validation/);
     expect(message).not.toContain(secret);
     expect(scanTextForSecrets(message)).toEqual([]);
     expect(await readdir(h.dir)).toEqual([]);

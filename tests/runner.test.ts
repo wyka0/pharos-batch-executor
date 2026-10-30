@@ -4,6 +4,7 @@ import { encodeFunctionResult, keccak256, type Hex } from 'viem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ContractArtifact } from '../src/artifacts.js';
 import { BATCH_EXECUTOR_ABI } from '../src/abi.js';
+import { ExecutionGateError, type PreConsumptionErrorCode } from '../src/errors.js';
 import { validateActions } from '../src/validation.js';
 import { broadcastPlanHash } from '../src/testnet/broadcast-plan.js';
 import { ExecutionJournal } from '../src/testnet/journal.js';
@@ -77,11 +78,21 @@ function approvalClock(c: Awaited<ReturnType<typeof context>>) {
   return { expires, expire() { time = expires; }, beforeExpiry() { time = expires - 1; } };
 }
 
+async function expectGateCode(promise: Promise<unknown>, code: PreConsumptionErrorCode): Promise<ExecutionGateError> {
+  try { await promise; }
+  catch (error) {
+    expect(error).toBeInstanceOf(ExecutionGateError);
+    expect((error as ExecutionGateError).code).toBe(code);
+    return error as ExecutionGateError;
+  }
+  throw new Error(`Expected ExecutionGateError ${code}.`);
+}
+
 describe('gated testnet runner — offline mock requests only', () => {
   it('requires approval and confirmation BEFORE key loading or submission', async () => {
     const c = await context();
-    await expect(executeApprovedPlan(c.plan, c.hash, false, c.deps)).rejects.toThrow(/confirm/);
-    await expect(executeApprovedPlan(c.plan, 'wrong', true, c.deps)).rejects.toThrow(/plan-hash/);
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, false, c.deps), 'PLAN_VALIDATION_FAILED');
+    await expectGateCode(executeApprovedPlan(c.plan, 'wrong', true, c.deps), 'PLAN_VALIDATION_FAILED');
     expect(c.signerLoader).not.toHaveBeenCalled();
     expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
   });
@@ -92,7 +103,7 @@ describe('gated testnet runner — offline mock requests only', () => {
       address: '0x1111111111111111111111111111111111111111' as const,
       sign: c.sign,
     }));
-    await expect(executeApprovedPlan(c.plan, c.hash, true, c.deps)).rejects.toThrow(/Validated signer/);
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'SIGNER_ADDRESS_MISMATCH');
     expect(await c.journal.readApprovalState()).toBe('UNUSED');
     expect(await c.journal.read()).toEqual([]);
     expect(await readdir(c.dir)).toEqual([]);
@@ -101,16 +112,93 @@ describe('gated testnet runner — offline mock requests only', () => {
   });
 
   it.each([
-    ['wrong chain', { getChainId: vi.fn(async () => 1672) }, /chain/],
-    ['insufficient funding', { getBalance: vi.fn(async () => 0n) }, /balance/],
-    ['nonce changed', { getTransactionCount: vi.fn(async () => 3) }, /Nonce/],
-    ['gas price raised', { getGasPrice: vi.fn(async () => 30_000_000_000n) }, /Gas price/],
-    ['estimation failure', { estimateGas: vi.fn(async () => { throw new Error('fixture estimate failure'); }) }, /preflight/],
-  ])('blocks %s before loading keys', async (_label, changes, pattern) => {
+    ['wrong chain', { getChainId: vi.fn(async () => 1672) }, 'RPC_PREFLIGHT_FAILED'],
+    ['insufficient funding', { getBalance: vi.fn(async () => 0n) }, 'BALANCE_INSUFFICIENT'],
+    ['nonce changed', { getTransactionCount: vi.fn(async () => 3) }, 'NONCE_CONFLICT'],
+    ['gas price raised', { getGasPrice: vi.fn(async () => 30_000_000_000n) }, 'GAS_PRICE_EXCEEDED'],
+    ['estimation failure', { estimateGas: vi.fn(async () => { throw new Error('fixture estimate failure'); }) }, 'FRESH_ESTIMATE_FAILED'],
+  ] as const)('blocks %s before loading keys', async (_label, changes, code) => {
     const c = await context(changes);
-    await expect(executeApprovedPlan(c.plan, c.hash, true, c.deps)).rejects.toThrow(pattern);
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), code);
     expect(c.signerLoader).not.toHaveBeenCalled();
     expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it('codes source-bound artifact mismatches at their actual guard', async () => {
+    const c = await context();
+    const load = c.deps.artifactLoader!;
+    c.deps.artifactLoader = async (name) => ({ ...(await load(name)), bytecode: name === 'BatchExecutor' ? '0x6001' : '0x6000' });
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'ARTIFACT_BINDING_FAILED');
+    expect(c.signerLoader).not.toHaveBeenCalled();
+  });
+
+  it('codes prerequisite verification failure before signer loading', async () => {
+    const c = await context({}, 'batch');
+    vi.mocked(c.deps.deployments.verifyPrerequisites).mockRejectedValue(new Error('untrusted prerequisite details'));
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'PREREQUISITE_VERIFICATION_FAILED');
+    expect(c.signerLoader).not.toHaveBeenCalled();
+  });
+
+  it('codes an existing deployment-stage claim without loading the signer', async () => {
+    const c = await context();
+    await c.deps.deployments.claim(c.plan, new Date().toISOString());
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'STAGE_ALREADY_CLAIMED');
+    expect(c.signerLoader).not.toHaveBeenCalled();
+  });
+
+  it('codes an occupied predicted CREATE address', async () => {
+    const c = await context();
+    const getCode = c.client.getCode;
+    const predicted = c.plan.transactions[0]!.expectedContractAddress!.toLowerCase();
+    c.client.getCode = vi.fn(async (request) => request.address.toLowerCase() === predicted ? '0x11' : getCode(request));
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'CREATE_ADDRESS_OCCUPIED');
+    expect(c.signerLoader).not.toHaveBeenCalled();
+  });
+
+  it('codes signer-source failures without consuming approval or exposing the cause', async () => {
+    const c = await context();
+    c.deps.signerLoader = async () => { throw new Error(`untrusted ${'PRIVATE_KEY'}=${'ab'.repeat(32)}`); };
+    const error = await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'SIGNER_SOURCE_FAILED');
+    expect(error.message).not.toContain('ab'.repeat(32));
+    expect(await c.journal.readApprovalState()).toBe('UNUSED');
+    expect(await readdir(c.dir)).toEqual([]);
+  });
+
+  it('codes an existing execution lock after signer validation but before approval consumption', async () => {
+    const c = await context();
+    const owner = new ExecutionJournal(c.dir, c.hash);
+    await owner.acquire();
+    try {
+      await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'EXECUTION_LOCK_EXISTS');
+      expect(await c.journal.readApprovalState()).toBe('UNUSED');
+      expect(c.sign).not.toHaveBeenCalled();
+    } finally { await owner.release(); }
+  });
+
+  it('codes an existing nonce approval reservation without consuming this plan', async () => {
+    const c = await context();
+    const otherPlan = structuredClone(c.plan);
+    otherPlan.disclosures = [...otherPlan.disclosures, 'SYNTHETIC competing approval fixture.'];
+    const otherHash = broadcastPlanHash(otherPlan);
+    const other = new ExecutionJournal(c.dir, otherHash);
+    await other.acquire(otherPlan.sender, [otherPlan.transactions[0]!.nonce]);
+    try { await other.claimApproval(otherPlan, new Date().toISOString()); }
+    finally { await other.release(); }
+
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'NONCE_RESERVATION_EXISTS');
+    expect(await c.journal.readApprovalState()).toBe('UNUSED');
+    expect(c.sign).not.toHaveBeenCalled();
+  });
+
+  it('maps unknown pre-consumption exceptions to a safe internal code', async () => {
+    const c = await context();
+    const secret = `untrusted ${'PRIVATE_KEY'}=${'cd'.repeat(32)}`;
+    vi.spyOn(c.journal, 'acquire').mockRejectedValue(new Error(secret));
+    const error = await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'INTERNAL_PRECONSUMPTION_FAILURE');
+    expect(error.message).not.toContain(secret);
+    expect(error.safeCause).toBe('PLAN_OR_SENDER_LOCK');
+    expect(await c.journal.readApprovalState()).toBe('UNUSED');
+    expect(c.sign).not.toHaveBeenCalled();
   });
 
   it('validates the signed payload and writes durable intent BEFORE each single submission', async () => {
@@ -271,7 +359,10 @@ describe('gated testnet runner — offline mock requests only', () => {
     expect(await c.journal.read()).toHaveLength(0);
   });
 
-  it.each(['artifact checks', 'signer loading'] as const)('rejects without consuming approval when it expires during pre-consumption %s', async (boundary) => {
+  it.each([
+    ['artifact checks', 'PLAN_VALIDATION_FAILED'],
+    ['signer loading', 'APPROVAL_EXPIRED_AFTER_SIGNER_LOAD'],
+  ] as const)('rejects without consuming approval when it expires during pre-consumption %s', async (boundary, code) => {
     const c = await context();
     const clock = approvalClock(c);
     if (boundary === 'artifact checks') {
@@ -282,7 +373,7 @@ describe('gated testnet runner — offline mock requests only', () => {
       const load = c.deps.signerLoader;
       c.deps.signerLoader = async () => { const signer = await load(); clock.expire(); return signer; };
     }
-    await expect(executeApprovedPlan(c.plan, c.hash, true, c.deps)).rejects.toThrow(/expired/);
+    await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), code);
     expect(c.sign).not.toHaveBeenCalled();
     expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
     expect(await c.journal.read()).toHaveLength(0);
