@@ -2,7 +2,7 @@
  * Offline staged two-deployment workflow. Real planner/runner/journal/store with
  * mocked RPC and SYNTHETIC signing identifiers only: no network, keys, or signatures.
  */
-import { readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { readdir, rm, writeFile } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import {
@@ -15,7 +15,7 @@ import { BATCH_EXECUTOR_ABI } from '../src/abi.js';
 import { scanTextForSecrets } from '../src/safety.js';
 import { validateActions } from '../src/validation.js';
 import { buildBroadcastPlan } from '../src/testnet/build-plan.js';
-import { broadcastPlanHash, PLAN_TTL_MS, verifyApproval, type BroadcastPlan } from '../src/testnet/broadcast-plan.js';
+import { broadcastPlanHash, verifyApproval, type BroadcastPlan } from '../src/testnet/broadcast-plan.js';
 import { DeploymentStore, deploymentBinding } from '../src/testnet/deployments.js';
 import { ExecutionJournal } from '../src/testnet/journal.js';
 import { executeApprovedPlan, type RunnerClient, type RunnerDependencies, type TestnetExecutionEvidence } from '../src/testnet/runner.js';
@@ -206,7 +206,7 @@ async function harness(): Promise<Harness> {
         chain.signed.set(raw.toLowerCase() as Hex, tx);
         return raw;
       });
-      const signerLoader = vi.fn(async () => ({ sign }));
+      const signerLoader = vi.fn(async () => ({ address: plan.sender, sign }));
       const deps: RunnerDependencies = {
         client: chain.client, journal, deployments: store, signerLoader, now,
         onEvidence: vi.fn(async () => {}),
@@ -378,55 +378,34 @@ describe('staged, separately approved deployments (offline simulation only)', ()
     expect(counter.transactions[0]!.nonce).toBe(4);
   });
 
-  it('a pre-intent abort is terminal: approval and nonce reservations persist and cannot be replayed', async () => {
+  it('signer validation failure leaves approval unconsumed and creates no execution or stage intent', async () => {
     const h = await harness();
     const plan = await h.plan({ purpose: 'deploy', stage: 'executor' });
     const run = h.run(plan, (deps) => {
       deps.signerLoader = async () => { throw new Error('simulated missing signing configuration'); };
     });
-    const evidence = await run.execute();
-    expect(evidence.state).toBe('HALTED');
-    expect(evidence.steps.map((step) => step.state)).toEqual(['ABORTED_BEFORE_SEND']);
+    await expect(run.execute()).rejects.toThrow(/signer validation/);
     expect(h.chain.client.sendRawTransaction).not.toHaveBeenCalled();
-    expect(await run.journal.readApprovalState()).toBe('ABORTED_BEFORE_SEND');
-    await expect(run.execute()).rejects.toThrow(/already has a record or intent/);
-    await expect(h.plan({ purpose: 'deploy', stage: 'executor' })).rejects.toThrow(/already has a record or intent/);
-
-    // A replacement approval for the same nonce cannot bypass the durable reservation.
-    const replaced = structuredClone(plan);
-    const freshNow = h.now();
-    replaced.createdAt = new Date(freshNow).toISOString();
-    replaced.expiresAt = new Date(freshNow + PLAN_TTL_MS - 1_000).toISOString();
-    const replacedHash = broadcastPlanHash(replaced);
-    // The stage claim blocks full replacement execution ...
-    const replacementRun = h.run(replaced);
-    await expect(executeApprovedPlan(replaced, replacedHash, true, replacementRun.deps))
-      .rejects.toThrow(/intent or approval reservation|already has a record or intent/);
-    // ... and the durable nonce reservation independently blocks any other approval for nonce 3.
-    await expect(new ExecutionJournal(h.dir, replacedHash).acquire(ACCOUNT, [3]))
-      .rejects.toThrow(/intent or approval reservation/);
-    expect(h.chain.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect(await run.journal.readApprovalState()).toBe('UNUSED');
+    expect(await run.journal.read()).toEqual([]);
+    expect(await readdir(h.dir)).toEqual([]);
+    await expect(h.plan({ purpose: 'deploy', stage: 'executor' })).resolves.toMatchObject({ deploymentStage: 'executor' });
   });
 
-  it('failed submissions never expose secrets in evidence or durable files', async () => {
+  it('signer validation failures never expose secrets or create durable files', async () => {
     const h = await harness();
     const plan = await h.plan({ purpose: 'deploy', stage: 'executor' });
     const secret = ['PRIVATE', 'KEY'].join('_') + '=' + ['0x', 'ab'.repeat(32)].join('');
     const run = h.run(plan, (deps) => {
       deps.signerLoader = async () => { throw new Error(`signing configuration contained ${secret}`); };
     });
-    const evidence = await run.execute();
-    expect(evidence.steps[0]!.state).toBe('ABORTED_BEFORE_SEND');
-    const serialized = JSON.stringify(evidence);
-    expect(serialized).not.toContain(secret);
-    expect(scanTextForSecrets(serialized)).toEqual([]);
-    // Durable files contain public plan/claim data only.
-    const stored = (await readdir(h.dir)).filter((name) => name.endsWith('.json'));
-    expect(stored.length).toBeGreaterThan(0);
-    for (const name of stored) {
-      const content = await readFile(path.join(h.dir, name), 'utf8');
-      expect(scanTextForSecrets(content)).toEqual([]);
-    }
+    let message = '';
+    try { await run.execute(); } catch (error) { message = error instanceof Error ? error.message : String(error); }
+    expect(message).toMatch(/signer validation/);
+    expect(message).not.toContain(secret);
+    expect(scanTextForSecrets(message)).toEqual([]);
+    expect(await readdir(h.dir)).toEqual([]);
+    expect(await run.journal.readApprovalState()).toBe('UNUSED');
     await expect(h.store.read(ACCOUNT, 'executor')).rejects.toThrow();
   });
 

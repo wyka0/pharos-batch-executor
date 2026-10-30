@@ -65,6 +65,7 @@ Do not install signing configuration into the repository. See
 | `node dist/cli.js --help` | Production CLI smoke test |
 | `npm run testnet:readiness -- --address <sender>` | Public read-only Atlantic observation |
 | `npm run testnet:plan -- ...` | Unsigned public approval plan; deployments are one stage per plan (`--stage executor` then, after stage 1 verifies, `--stage counter`); no signer |
+| `npm run testnet:validate-signer -- --address <sender> --env-file <absolute-path>` | Validate an explicitly selected local signer address only; no approval, intent, signing or broadcast |
 | `npm run testnet:run -- ...` | Explicitly gated live TESTNET path only |
 | `npm run testnet:status -- --plan <plan>` | Read-only reconciliation; never sends or clears state |
 

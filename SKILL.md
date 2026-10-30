@@ -108,9 +108,14 @@ the frozen proof.
     Stop and obtain explicit user approval of this exact plan. A later batch/baseline requires
    its own approval; deployment approval does not authorize them.
 5. **Execute only after approval.** Follow the exact command in
-   [Atlantic workflow](docs/atlantic.md). Supply only a local path to existing
-    signing configuration, never its contents. The runner loads it lazily,
-    verifies the signed payload offline, completes post-sign checks, fsyncs INTENT
+    [Atlantic workflow](docs/atlantic.md). Supply only a local path to existing
+     signing configuration, never its contents. The path must be absolute and
+     explicitly selected; `.env.local` is never auto-discovered. Use
+     `npm run testnet:validate-signer -- --address <sender> --env-file
+     <absolute-path>` for non-broadcasting address validation. The runner loads
+     and validates the signer after read-only preflight but before consuming the
+     approval or creating a durable stage/transaction intent, then
+     verifies the signed payload offline, completes post-sign checks, fsyncs INTENT
     and persists evidence. It then rechecks approval synchronously after all
     pre-send awaits, immediately before the single submission invocation. Expiry
     at that boundary is terminal `ABORTED_BEFORE_SEND`, not a retryable send.

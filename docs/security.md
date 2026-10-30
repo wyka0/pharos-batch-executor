@@ -7,13 +7,25 @@ guardrails, not a promise of complete safety for arbitrary targets.
 
 - Model, validation, planning, readiness, simulation and reconciliation never
   need signing configuration. Only the separately gated runner imports the
-  local signer after pure approval checks and read-only preflight.
+  local signer after pure approval checks and read-only preflight. It validates
+  signer identity before approval consumption, deployment claims or transaction
+  intents are persisted.
 - The user must approve the exact public plan hash, sender and Atlantic TESTNET.
   CLI flags are review acknowledgements, not a cryptographic user-authentication
   service. An agent must not invent consent by setting those flags itself.
-- Configure an existing external local file with `PRIVATE_KEY` (optional `RPC_URL`
-  must exactly match Atlantic). Never put a key in this repo, chat, flags, example,
-  CI, evidence or commit. The runner receives a file **path**, not key contents.
+- Configure an existing explicitly selected **absolute** local file path with
+  `PRIVATE_KEY` (optional `RPC_URL` must exactly match Atlantic). The runner never
+  auto-discovers `.env.local`; an already-existing Git-ignored `.env.local` can be
+  selected explicitly without copying its secret. Never put a key in chat, flags,
+  examples, CI, evidence or a commit. The runner receives a file path, not key
+  contents. Run `npm run testnet:validate-signer -- --address <sender> --env-file
+  <absolute-path>` to validate the derived address without signing, consuming an
+  approval or creating an intent.
+- Signer sources must be regular non-symlink files and remain bounded to 64 KiB.
+  The Node validator does **not** verify Windows ownership or ACLs; protect the
+  selected file with current-user-only NTFS permissions. It also reads the whole
+  selected file into process memory and cannot zeroize JavaScript strings. A
+  hard link cannot be distinguished from a regular file by these checks.
 - The signer checks the public sender, signs offline, and the runner independently
   checks recovered sender/chain/nonce/to/data/value/gas/price before any intent.
   Signed bytes stay in memory; signing/submission exception objects are never logged.

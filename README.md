@@ -136,6 +136,10 @@ after deployment with `npm run actions:demo -- --target <test-only-counter>
 Broadcast is deliberately a separate command. [The approval workflow](docs/atlantic.md)
 requires explicit user consent for the exact plan, network and sender, plus
 `--approve-plan`, `--confirm-atlantic-testnet` and a local `--env-file` path.
+The signer path must be absolute and explicitly selected; use
+`npm run testnet:validate-signer -- --address <sender> --env-file <absolute-path>`
+to check its derived public address without consuming approval, signing or
+broadcasting. `.env.local` is never auto-discovered.
 Do not load or paste signing configuration during dry-runs. Approval is checked
 synchronously immediately before submission, after all pre-send awaits. Expiry
 at that boundary produces terminal `ABORTED_BEFORE_SEND` with no RPC send;

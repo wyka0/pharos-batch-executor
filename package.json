@@ -26,6 +26,7 @@
     "contracts:test": "node scripts/test-contracts.mjs",
     "testnet:readiness": "tsx scripts/testnet-readiness.ts",
     "testnet:plan": "tsx scripts/testnet-plan.ts",
+    "testnet:validate-signer": "tsx scripts/testnet-signer-validate.ts",
     "testnet:run": "tsx scripts/testnet-run.ts",
     "testnet:status": "tsx scripts/testnet-status.ts",
     "typecheck": "tsc --noEmit",

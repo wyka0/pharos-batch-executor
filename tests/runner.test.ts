@@ -1,5 +1,5 @@
 /** Mock RPC and synthetic signing identifiers ONLY. No HTTP, keys or signatures. */
-import { rm } from 'node:fs/promises';
+import { readdir, rm } from 'node:fs/promises';
 import { encodeFunctionResult, keccak256, type Hex } from 'viem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ContractArtifact } from '../src/artifacts.js';
@@ -62,7 +62,7 @@ async function context(changes: Partial<RunnerClient> = {}, purpose: 'deploy' | 
   const sign = vi.fn(async (tx: UnsignedTestnetTransaction) => {
     const raw = fakeSign(tx, plan.sender); signed.set(keccak256(raw), tx); return raw;
   });
-  const signerLoader = vi.fn(async () => ({ sign }));
+  const signerLoader = vi.fn(async () => ({ address: plan.sender, sign }));
   const artifactLoader: RunnerDependencies['artifactLoader'] = async (name) => ({ contractName: name,
     source: 'UNIT FIXTURE', sourceHash: 'UNIT FIXTURE', compiler: 'solc-0.8.24', evmVersion: 'paris', optimizerRuns: 200,
     abi: [], bytecode: '0x6000', runtimeBytecode: '0x00', runtimeCodeHash: keccak256('0x00'), bytecodeHash: keccak256('0x6000') } satisfies ContractArtifact);
@@ -83,6 +83,20 @@ describe('gated testnet runner — offline mock requests only', () => {
     await expect(executeApprovedPlan(c.plan, c.hash, false, c.deps)).rejects.toThrow(/confirm/);
     await expect(executeApprovedPlan(c.plan, 'wrong', true, c.deps)).rejects.toThrow(/plan-hash/);
     expect(c.signerLoader).not.toHaveBeenCalled();
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a mismatched validated signer before consuming approval or creating any intent', async () => {
+    const c = await context();
+    c.deps.signerLoader = vi.fn(async () => ({
+      address: '0x1111111111111111111111111111111111111111' as const,
+      sign: c.sign,
+    }));
+    await expect(executeApprovedPlan(c.plan, c.hash, true, c.deps)).rejects.toThrow(/Validated signer/);
+    expect(await c.journal.readApprovalState()).toBe('UNUSED');
+    expect(await c.journal.read()).toEqual([]);
+    expect(await readdir(c.dir)).toEqual([]);
+    expect(c.sign).not.toHaveBeenCalled();
     expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
   });
 
@@ -184,7 +198,7 @@ describe('gated testnet runner — offline mock requests only', () => {
 
   it('malformed signer output is rejected OFFLINE before any intent or send', async () => {
     const c = await context();
-    c.deps.signerLoader = async () => ({ sign: async () => '0x01' });
+    c.deps.signerLoader = async () => ({ address: c.plan.sender, sign: async () => '0x01' });
     const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
     expect(result.steps.map((s) => s.state)).toEqual(['ABORTED_BEFORE_SEND']);
     expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
@@ -249,7 +263,7 @@ describe('gated testnet runner — offline mock requests only', () => {
     c.deps.now = () => clock;
     c.deps.signerLoader = async () => {
       const signer = await originalLoader();
-      return { async sign(tx) { const raw = await signer.sign(tx); clock += 120_000; return raw; } };
+      return { ...signer, async sign(tx) { const raw = await signer.sign(tx); clock += 120_000; return raw; } };
     };
     const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
     expect(result.steps.every((s) => s.state === 'ABORTED_BEFORE_SEND')).toBe(true);
@@ -257,34 +271,56 @@ describe('gated testnet runner — offline mock requests only', () => {
     expect(await c.journal.read()).toHaveLength(0);
   });
 
-  it.each(['artifact checks', 'journal acquisition', 'initial evidence persistence', 'signer loading'] as const)('fails closed when approval expires during %s', async (boundary) => {
+  it.each(['artifact checks', 'signer loading'] as const)('rejects without consuming approval when it expires during pre-consumption %s', async (boundary) => {
     const c = await context();
     const clock = approvalClock(c);
     if (boundary === 'artifact checks') {
       const load = c.deps.artifactLoader!;
       c.deps.artifactLoader = async (name) => { const artifact = await load(name); clock.expire(); return artifact; };
     }
-    if (boundary === 'journal acquisition') {
-      const acquire = c.journal.acquire.bind(c.journal);
-      vi.spyOn(c.journal, 'acquire').mockImplementation(async (...args) => { await acquire(...args); clock.expire(); });
-    }
-    if (boundary === 'initial evidence persistence') c.deps.onEvidence = async () => { await Promise.resolve(); clock.expire(); };
     if (boundary === 'signer loading') {
       const load = c.deps.signerLoader;
       c.deps.signerLoader = async () => { const signer = await load(); clock.expire(); return signer; };
     }
-    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
-    expect(result.state).toBe('HALTED');
-    expect(result.steps.every((step) => step.state === 'ABORTED_BEFORE_SEND')).toBe(true);
+    await expect(executeApprovedPlan(c.plan, c.hash, true, c.deps)).rejects.toThrow(/expired/);
     expect(c.sign).not.toHaveBeenCalled();
     expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
     expect(await c.journal.read()).toHaveLength(0);
     expect(c.signerLoader).toHaveBeenCalledTimes(boundary === 'signer loading' ? 1 : 0);
+    expect(await c.journal.readApprovalState()).toBe('UNUSED');
+  });
+
+  it.each(['journal acquisition', 'initial evidence persistence'] as const)('fails closed when approval expires during %s', async (boundary) => {
+    const c = await context();
+    const clock = approvalClock(c);
+    if (boundary === 'journal acquisition') {
+      const acquire = c.journal.acquire.bind(c.journal);
+      vi.spyOn(c.journal, 'acquire').mockImplementation(async (...args) => { await acquire(...args); clock.expire(); });
+    } else c.deps.onEvidence = async () => { await Promise.resolve(); clock.expire(); };
+    const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
+    expect(result.state).toBe('HALTED');
+    expect(result.steps.every((step) => step.state === 'ABORTED_BEFORE_SEND')).toBe(true);
+    expect(c.signerLoader).toHaveBeenCalledTimes(1);
+    expect(c.sign).not.toHaveBeenCalled();
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
+    expect(await c.journal.read()).toHaveLength(0);
+    expect(await c.journal.readApprovalState()).toBe(boundary === 'journal acquisition' ? 'UNUSED' : 'ABORTED_BEFORE_SEND');
+  });
+
+  it('rejects expiry during initial preflight before loading or consuming signer approval', async () => {
+    const c = await context();
+    const clock = approvalClock(c);
+    const read = c.client.getBlock;
+    c.client.getBlock = vi.fn(async (request) => { const block = await read(request); clock.expire(); return block; });
+    await expect(executeApprovedPlan(c.plan, c.hash, true, c.deps)).rejects.toThrow(/expired/);
+    expect(c.signerLoader).not.toHaveBeenCalled();
+    expect(await c.journal.readApprovalState()).toBe('UNUSED');
+    expect(await c.journal.read()).toEqual([]);
   });
 
   it.each([
-    ['initial preflight', 1, 'ABORTED_BEFORE_SEND'], ['pre-sign checks', 2, 'ABORTED_BEFORE_SEND'], ['post-sign checks', 3, 'ABORTED_BEFORE_SEND'],
-  ] as const)('catches expiry during %s, including awaits after signed-payload verification', async (_label, expireRead, expected) => {
+    ['pre-sign checks', 2], ['post-sign checks', 3],
+  ] as const)('catches expiry during %s, including awaits after signed-payload verification', async (_label, expireRead) => {
     const c = await context();
     const clock = approvalClock(c);
     const read = c.client.getBlock;
@@ -292,7 +328,7 @@ describe('gated testnet runner — offline mock requests only', () => {
     c.client.getBlock = vi.fn(async (request) => { const block = await read(request); if (++reads === expireRead) clock.expire(); return block; });
     const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
     expect(result.state).toBe('HALTED');
-    expect(result.steps.map((step) => step.state)).toEqual([expected]);
+    expect(result.steps.map((step) => step.state)).toEqual(['ABORTED_BEFORE_SEND']);
     expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
     expect((await c.journal.read()).map((entry) => entry.state)).toEqual(expireRead === 3 ? ['INTENT', 'ABORTED_BEFORE_SEND'] : []);
   });
@@ -407,7 +443,7 @@ describe('gated testnet runner — offline mock requests only', () => {
     const originalLoader = c.deps.signerLoader;
     c.deps.signerLoader = async () => {
       const signer = await originalLoader();
-      return { sign: (tx) => signer.sign({ ...tx, [field]: field === 'data' ? '0x6001' : field === 'nonce' ? 9 : field === 'chainId' ? 1672 : 1n } as UnsignedTestnetTransaction) };
+      return { ...signer, sign: (tx) => signer.sign({ ...tx, [field]: field === 'data' ? '0x6001' : field === 'nonce' ? 9 : field === 'chainId' ? 1672 : 1n } as UnsignedTestnetTransaction) };
     };
     const result = await executeApprovedPlan(c.plan, c.hash, true, c.deps);
     expect(result.steps[0]?.state).toBe('ABORTED_BEFORE_SEND');

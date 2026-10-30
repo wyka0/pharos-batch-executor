@@ -48,12 +48,22 @@ and prerequisites, so it cannot be replayed across stages.
 
 ## 2. Broadcast only the approved stage plan
 
-Only after consent, use an existing local signing file **outside the repository**.
+Only after consent, use an explicitly selected absolute local signing-file path.
+An external current-user-only file is preferred. An existing Git-ignored
+`.env.local` is also supported when selected explicitly; it is never discovered
+automatically and does not need to be copied. The signer loader rejects relative
+paths, symlinks, non-files and files over 64 KiB, but does not verify Windows ACLs.
+
+Validate the signer source without consuming approval or creating an intent:
+
+```bash
+npm run testnet:validate-signer -- --address <sender> --env-file <absolute-local-file>
+```
 
 The runner takes the plan payload hash as the exact approval:
 
 ```bash
-npm run testnet:run -- --plan <stage-plan.json> --approve-plan <exact-sha256-hash> --confirm-atlantic-testnet --env-file <external-local-file>
+npm run testnet:run -- --plan <stage-plan.json> --approve-plan <exact-sha256-hash> --confirm-atlantic-testnet --env-file <absolute-local-file>
 ```
 
 The file has a locally configured `PRIVATE_KEY` and optionally `RPC_URL`; neither

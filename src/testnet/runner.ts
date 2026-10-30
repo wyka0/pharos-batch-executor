@@ -72,14 +72,21 @@ export async function executeApprovedPlan(
   deps.journal.assertPlan(plan);
   if (path.relative(deps.journal.directory, deps.deployments.directory) !== '') throw new ExecutionGateError('Journal and deployment records must share one durable state directory.');
   const artifacts = await artifactBindings(plan, deps.artifactLoader ?? loadArtifact);
+  let signer: TestnetSigner;
   try {
     await deps.deployments.verifyPrerequisites(plan, deps.client, deps.artifactLoader);
     if (plan.purpose === 'deploy') await deps.deployments.assertAvailable(plan.sender, plan.deploymentStage!);
     await preflight(plan, deps.client, artifacts);
+    // Load and validate the explicitly selected signer before consuming approval
+    // or creating any durable stage/transaction intent.
+    verifyApproval(plan, approvalHash, confirmed, now());
+    signer = await deps.signerLoader();
+    if (signer.address.toLowerCase() !== plan.sender.toLowerCase()) throw new ExecutionGateError('Validated signer does not match the approved sender.');
+    verifyApproval(plan, approvalHash, confirmed, now());
     await deps.journal.acquire(plan.sender, plan.transactions.map((tx) => tx.nonce));
   } catch (error) {
     if (error instanceof ExecutionGateError) throw error;
-    throw new ExecutionGateError('Read-only preflight or durable-state acquisition failed; no signing or submission attempted.');
+    throw new ExecutionGateError('Read-only preflight, signer validation or durable-state acquisition failed; no signing or submission attempted.');
   }
   const evidence: TestnetExecutionEvidence = {
     schemaVersion: 1, classification: 'ATLANTIC TESTNET', planHash: hash, plan,
@@ -106,7 +113,6 @@ export async function executeApprovedPlan(
     if (plan.purpose === 'deploy') await deps.deployments.claim(plan, new Date(now()).toISOString());
     await persist();
     verifyApproval(plan, approvalHash, confirmed, now());
-    const signer = await deps.signerLoader();
     for (const [index, tx] of plan.transactions.entries()) {
       const step = evidence.steps[index]!;
       try {

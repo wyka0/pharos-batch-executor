@@ -1,4 +1,5 @@
-import { readFile, stat } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { privateKeyToAccount } from 'viem/accounts';
 import type { Hex } from '../types.js';
 import { ExecutionGateError } from '../errors.js';
@@ -8,12 +9,36 @@ export interface UnsignedTestnetTransaction {
   chainId: 688689; nonce: number; to?: Hex; data: Hex; value: bigint;
   gas: bigint; gasPrice: bigint; type: 'legacy';
 }
-export interface TestnetSigner { sign(tx: UnsignedTestnetTransaction): Promise<Hex> }
+export interface TestnetSigner { readonly address: Hex; sign(tx: UnsignedTestnetTransaction): Promise<Hex> }
 
-/** ONLY the gated runner calls this, after approval + read-only preflight. */
-export async function loadLocalSigner(envFile: string, expectedAddress: Hex): Promise<TestnetSigner> {
-  if ((await stat(envFile)).size > 65_536) throw new ExecutionGateError('Local signing configuration file exceeds size limit.');
-  const text = await readFile(envFile, 'utf8');
+interface LocalSignerAccount {
+  address: Hex;
+  signTransaction(tx: UnsignedTestnetTransaction): Promise<Hex>;
+}
+
+export interface LocalSignerDependencies {
+  accountFromPrivateKey(key: Hex): LocalSignerAccount;
+}
+
+const DEFAULT_DEPENDENCIES: LocalSignerDependencies = {
+  accountFromPrivateKey: (key) => privateKeyToAccount(key) as LocalSignerAccount,
+};
+
+/** Explicit local file only. Validation may call this without invoking sign(). */
+export async function loadLocalSigner(
+  envFile: string, expectedAddress: Hex, dependencies: LocalSignerDependencies = DEFAULT_DEPENDENCIES,
+): Promise<TestnetSigner> {
+  if (typeof envFile !== 'string' || !path.isAbsolute(envFile)) {
+    throw new ExecutionGateError('An explicitly selected absolute signer configuration path is required.');
+  }
+  let info;
+  try { info = await lstat(envFile); }
+  catch { throw new ExecutionGateError('Explicit signer configuration cannot be safely inspected.'); }
+  if (!info.isFile() || info.isSymbolicLink()) throw new ExecutionGateError('Signer configuration must be a regular non-symlink file.');
+  if (info.size > 65_536) throw new ExecutionGateError('Local signing configuration file exceeds size limit.');
+  let text: string;
+  try { text = await readFile(envFile, 'utf8'); }
+  catch { throw new ExecutionGateError('Explicit signer configuration cannot be safely read.'); }
   const variable = (name: string): string | undefined => {
     const matches = text.split(/\r?\n/).filter((line) => new RegExp(`^\\s*(?:export\\s+)?${name}\\s*=`).test(line));
     if (matches.length > 1) throw new ExecutionGateError('Duplicate signing configuration variable.');
@@ -26,10 +51,10 @@ export async function loadLocalSigner(envFile: string, expectedAddress: Hex): Pr
   const key = variable('PRIVATE_KEY');
   if (key === undefined || !/^(?:0x)?[0-9a-fA-F]{64}$/.test(key)) throw new ExecutionGateError('Local signing key is missing or malformed; do not paste it in chat.');
   let account;
-  try { account = privateKeyToAccount((key.startsWith('0x') ? key : `0x${key}`) as Hex); }
+  try { account = dependencies.accountFromPrivateKey((key.startsWith('0x') ? key : `0x${key}`) as Hex); }
   catch { throw new ExecutionGateError('Local signing key is invalid.'); }
   if (account.address.toLowerCase() !== expectedAddress.toLowerCase()) throw new ExecutionGateError('Signing account does not match the explicitly approved public sender.');
-  return { async sign(tx) {
+  return { address: account.address, async sign(tx) {
     if (tx.chainId !== 688689 || tx.type !== 'legacy') throw new ExecutionGateError('Signer refuses non-Atlantic/non-legacy transaction.');
     try { return await account.signTransaction(tx); }
     catch { throw new ExecutionGateError('Offline transaction signing failed; no sensitive exception logged.'); }
