@@ -8,6 +8,7 @@ import { ExecutionGateError, type PreConsumptionErrorCode } from '../src/errors.
 import { validateActions } from '../src/validation.js';
 import { broadcastPlanHash } from '../src/testnet/broadcast-plan.js';
 import { ExecutionJournal } from '../src/testnet/journal.js';
+import { withReadOnlyRpcRetries } from '../src/testnet/read-retry.js';
 import { executeApprovedPlan, type RunnerClient, type RunnerDependencies } from '../src/testnet/runner.js';
 import type { UnsignedTestnetTransaction } from '../src/testnet/signer.js';
 import { batchPlan, deployPlan } from './broadcast-fixtures.js';
@@ -199,6 +200,20 @@ describe('gated testnet runner — offline mock requests only', () => {
     expect(error.safeCause).toBe('PLAN_OR_SENDER_LOCK');
     expect(await c.journal.readApprovalState()).toBe('UNUSED');
     expect(c.sign).not.toHaveBeenCalled();
+  });
+
+  it('exhausts bounded read retries fail-closed without approval, intent or reservation', async () => {
+    const c = await context();
+    const getChainId = vi.fn(async () => { throw { name: 'TimeoutError' }; });
+    c.deps.client = withReadOnlyRpcRetries({ ...c.client, getChainId }, { sleep: async () => {} });
+    const error = await expectGateCode(executeApprovedPlan(c.plan, c.hash, true, c.deps), 'RPC_PREFLIGHT_FAILED');
+    expect(error.safeCause).toBe('RPC_STATE_READ');
+    expect(getChainId).toHaveBeenCalledTimes(3);
+    expect(await c.journal.readApprovalState()).toBe('UNUSED');
+    expect(await c.journal.read()).toEqual([]);
+    expect(await readdir(c.dir)).toEqual([]);
+    expect(c.sign).not.toHaveBeenCalled();
+    expect(c.client.sendRawTransaction).not.toHaveBeenCalled();
   });
 
   it('validates the signed payload and writes durable intent BEFORE each single submission', async () => {

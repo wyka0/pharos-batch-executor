@@ -1,11 +1,15 @@
 import { createPublicClient, http, type Address, type Chain, type HttpTransport, type PublicClient } from 'viem';
 import { ExecutionGateError } from '../errors.js';
 import { ATLANTIC, ATLANTIC_CHAIN } from '../network.js';
+import { withReadOnlyRpcRetries } from './read-retry.js';
 
 /** Public-client only: no wallet, key, signing or submission capability. */
 export function atlanticPublicClient(): PublicClient<HttpTransport, Chain> {
-  return createPublicClient({ chain: ATLANTIC_CHAIN, cacheTime: 0,
+  const client = createPublicClient({ chain: ATLANTIC_CHAIN, cacheTime: 0,
+    // Keep transport-level retries disabled. Only allowlisted read methods are
+    // retried by the strict wrapper; sendRawTransaction remains single-attempt.
     transport: http(ATLANTIC.rpcUrl, { retryCount: 0, timeout: 20_000 }) });
+  return withReadOnlyRpcRetries(client);
 }
 
 export async function getReadiness(address: Address) {

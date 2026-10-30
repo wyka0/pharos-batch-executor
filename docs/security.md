@@ -30,9 +30,17 @@ guardrails, not a promise of complete safety for arbitrary targets.
   checks recovered sender/chain/nonce/to/data/value/gas/price before any intent.
   Signed bytes stay in memory; signing/submission exception objects are never logged.
 - A pre-consumption refusal prints only a stable categorical code and the generic
-  refusal text. Raw RPC, filesystem and signer exceptions, static internal cause
-  labels and configuration values are never printed. Unknown failures map to
-  `INTERNAL_PRECONSUMPTION_FAILURE`; they never become success.
+  refusal text plus an allowlisted static internal cause label. Raw RPC,
+  filesystem and signer exceptions, response bodies, paths and configuration
+  values are never printed. Unknown code/cause values map to
+  `INTERNAL_PRECONSUMPTION_FAILURE [UNKNOWN_PRECONSUMPTION]`; they never become
+  success.
+- The HTTP transport itself remains zero-retry. An explicit method allowlist
+  retries idempotent public reads at most twice (100 ms then 200 ms) only for
+  timeouts, connection/socket failures, or HTTP 429/502/503/504. JSON-RPC
+  reverts, invalid parameters, other HTTP statuses and every signing/submission
+  method are never retried. Exhaustion remains a fail-closed pre-consumption
+  refusal with approval and intent state untouched.
 - After post-sign checks, journal fsync and public-evidence persistence, a final
   **synchronous** approval check runs immediately before `sendRawTransaction`,
   with no intervening await. A deadline reached there produces terminal
