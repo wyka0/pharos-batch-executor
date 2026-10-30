@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "classification": "CONTROLLED LIVE ATLANTIC GAS COMPARISON",
+  "generatedAt": "2026-10-30T16:39:10.414Z",
+  "network": {
+    "name": "Pharos Atlantic Testnet",
+    "chainId": 688689
+  },
+  "sourceCommit": "8f704ff29754aec698c22e9a2727a3ea8a7eb65b",
+  "individual": {
+    "transactionCount": 3,
+    "actualReceiptGas": "136959",
+    "planHash": "sha256:9e1a695d4ea56394fecdfb757069c281d9799d9fba012fe773d043bb3026b8ab",
+    "transactionHashes": [
+      "0xfcdcff317361ff493756f2dc743077b651d7047a287a151b27485dbaf85984b1",
+      "0x506815a65f1547de7df308caec1adf87a2816239bc245f112023c6383bc1f4f1",
+      "0xd54f3ea4c6b05abc2ef98c7c5123dc359239a1bf48d7a4b2a4e7211cf05cb18c"
+    ]
+  },
+  "batch": {
+    "transactionCount": 1,
+    "actualReceiptGas": "133722",
+    "planHash": "sha256:b624bfb19e37b84ef62786b90613d854167400e8df2fab6554a6c372fc00c4bd",
+    "transactionHash": "0xf5c66a8a443ca582ac418d4cfbc3e24aad67be90e2cc356a676a57a755c62992"
+  },
+  "differenceGas": "3237",
+  "reductionFractionOfIndividual": 0.02363481041771625,
+  "reductionPercent": 2.363481041771625,
+  "transactionReduction": {
+    "count": 2,
+    "percent": 66.66666666666667
+  },
+  "partialFailureBatchGas": "110637",
+  "receiptDerivedFeesWei": {
+    "individual": "1369590000000000",
+    "batch": "1337220000000000",
+    "partialFailureBatch": "1106370000000000"
+  },
+  "disclosure": "This is a controlled equivalent-fresh-storage comparison at different blocks. It is not an identical-state, same-block or snapshot-restored benchmark. The observed difference is specific to these live transactions and is not a guaranteed or universal gas saving.",
+  "setupAndDeploymentGasExcluded": true
+}

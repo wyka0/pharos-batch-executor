@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "classification": "VERIFIED ATLANTIC SUCCESS BATCH",
+  "generatedAt": "2026-10-30T16:39:10.414Z",
+  "network": {
+    "name": "Pharos Atlantic Testnet",
+    "chainId": 688689,
+    "explorer": "https://atlantic.pharosscan.xyz/"
+  },
+  "sourceCommit": "8f704ff29754aec698c22e9a2727a3ea8a7eb65b",
+  "rawSourceReference": {
+    "path": "state/testnet/b624bfb19e37b84ef62786b90613d854167400e8df2fab6554a6c372fc00c4bd.execution.json",
+    "sha256": "8244422b1ed7e083a688fbc666d59c97c712c1c59812469d7923fcd43f7ac3a6",
+    "tracked": false
+  },
+  "planHash": "sha256:b624bfb19e37b84ef62786b90613d854167400e8df2fab6554a6c372fc00c4bd",
+  "payloadHashes": [
+    "sha256:071dbe7ee75ec079bef49aaa135f7c46e4f20f7f314fcd4059e00fcdbf242b32"
+  ],
+  "transactionCount": 1,
+  "receipt": {
+    "transactionHash": "0xf5c66a8a443ca582ac418d4cfbc3e24aad67be90e2cc356a676a57a755c62992",
+    "explorerUrl": "https://atlantic.pharosscan.xyz/tx/0xf5c66a8a443ca582ac418d4cfbc3e24aad67be90e2cc356a676a57a755c62992",
+    "status": "success",
+    "blockNumber": "32077196",
+    "blockHash": "0x453f3df26fa8d6b862f4a43e46f7ca887c48903a0e4fec5b17429bcf8395d392",
+    "confirmationsAtPackaging": "1858",
+    "gasUsed": "133722",
+    "effectiveGasPriceWei": "10000000000",
+    "receiptDerivedFeeWei": "1337220000000000",
+    "independentlyObservedBalanceDebitWei": null,
+    "feeDisclosure": "gasUsed × effectiveGasPrice; not an independently observed account debit"
+  },
+  "actions": [
+    {
+      "index": 0,
+      "id": "success-5-0",
+      "target": "0xD54115B2c5698AAf468aa3d6623A3Dc3A650b47E",
+      "success": true,
+      "status": "succeeded",
+      "returnData": "0x000000000000000000000000000000000000000000000000000000000000000a",
+      "returnDataSize": "32",
+      "error": null
+    },
+    {
+      "index": 1,
+      "id": "success-5-1",
+      "target": "0xD54115B2c5698AAf468aa3d6623A3Dc3A650b47E",
+      "success": true,
+      "status": "succeeded",
+      "returnData": "0x000000000000000000000000000000000000000000000000000000000000000b",
+      "returnDataSize": "32",
+      "error": null
+    },
+    {
+      "index": 2,
+      "id": "success-5-2",
+      "target": "0xD54115B2c5698AAf468aa3d6623A3Dc3A650b47E",
+      "success": true,
+      "status": "succeeded",
+      "returnData": "0x000000000000000000000000000000000000000000000000000000000000000c",
+      "returnDataSize": "32",
+      "error": null
+    }
+  ],
+  "expectedOutcomesMatch": true,
+  "eventSummary": {
+    "ValueSet": 3,
+    "ActionExecuted": 3,
+    "BatchExecuted": {
+      "sender": "0x299Ce4113abF88F4997737184aa8A7a3D58AC15C",
+      "total": 3,
+      "succeeded": 3,
+      "failed": 0
+    }
+  },
+  "postState": [
+    {
+      "actionId": "success-5-0",
+      "key": "0xb50dea81dee22476afe7d09334e7e8a17932fc56adb7b07f4667fb8608b08e58",
+      "value": "10"
+    },
+    {
+      "actionId": "success-5-1",
+      "key": "0x35e17ba5620f65ffbc22d1b633862f25508f961a909ce1c3a8c2aa031156e06e",
+      "value": "11"
+    },
+    {
+      "actionId": "success-5-2",
+      "key": "0xc013f8d18485cdc00ae8a0025651fca2f80a782aafdd30810c7e49d9612d6ff5",
+      "value": "12"
+    }
+  ],
+  "approvalState": "CLAIMED",
+  "journal": [
+    {
+      "index": 0,
+      "state": "INTENT",
+      "nonce": 5,
+      "transactionHash": "0xf5c66a8a443ca582ac418d4cfbc3e24aad67be90e2cc356a676a57a755c62992"
+    },
+    {
+      "index": 0,
+      "state": "SUBMITTED",
+      "nonce": 5,
+      "transactionHash": "0xf5c66a8a443ca582ac418d4cfbc3e24aad67be90e2cc356a676a57a755c62992"
+    },
+    {
+      "index": 0,
+      "state": "CONFIRMED",
+      "nonce": 5,
+      "transactionHash": "0xf5c66a8a443ca582ac418d4cfbc3e24aad67be90e2cc356a676a57a755c62992"
+    }
+  ],
+  "unresolvedHashes": false
+}

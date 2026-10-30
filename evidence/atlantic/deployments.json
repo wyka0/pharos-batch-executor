@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "classification": "VERIFIED ATLANTIC DEPLOYMENTS",
+  "generatedAt": "2026-10-30T16:39:10.414Z",
+  "network": {
+    "name": "Pharos Atlantic Testnet",
+    "chainId": 688689,
+    "explorer": "https://atlantic.pharosscan.xyz/"
+  },
+  "sourceCommit": "8f704ff29754aec698c22e9a2727a3ea8a7eb65b",
+  "deployer": "0x299Ce4113abF88F4997737184aa8A7a3D58AC15C",
+  "contracts": [
+    {
+      "contract": "BatchExecutor",
+      "recordHash": "sha256:01d31021e2cd3c97a7b5ac710dff5b0e4692c6e9401b330d9a1280031e59356a",
+      "planHash": "sha256:66b1885ddb41485638d5a84f4a0de022393c106cf2acfbf9c5a24b451f6e59c5",
+      "transactionHash": "0x0a548e5592cb051884dc54187279fe2830dbb8197976b3e66320a104efebdd0c",
+      "address": "0xf25013db14c8b412191ff5f0606649a23d974032",
+      "runtimeCodeHash": "0xb7a763f48220d4c7567bad950575b0131c2eeaeba9db18c1c250d9a004441beb",
+      "blockNumber": "32067002",
+      "blockHash": "0x0de746ddc0a9dd881162f75f51e93dd0dee03e2164e57e89519c20a8e68bed40",
+      "authorizedCaller": "0x299Ce4113abF88F4997737184aa8A7a3D58AC15C",
+      "receipt": {
+        "transactionHash": "0x0a548e5592cb051884dc54187279fe2830dbb8197976b3e66320a104efebdd0c",
+        "explorerUrl": "https://atlantic.pharosscan.xyz/tx/0x0a548e5592cb051884dc54187279fe2830dbb8197976b3e66320a104efebdd0c",
+        "status": "success",
+        "blockNumber": "32067002",
+        "blockHash": "0x0de746ddc0a9dd881162f75f51e93dd0dee03e2164e57e89519c20a8e68bed40",
+        "confirmationsAtPackaging": "12051",
+        "gasUsed": "786847",
+        "effectiveGasPriceWei": "10000000000",
+        "receiptDerivedFeeWei": "7868470000000000",
+        "independentlyObservedBalanceDebitWei": null,
+        "feeDisclosure": "gasUsed × effectiveGasPrice; not an independently observed account debit"
+      },
+      "verification": {
+        "canonicalTransactionReceiptBlock": true,
+        "sourceBoundRuntime": true,
+        "currentRuntime": true,
+        "authorizedCaller": true
+      }
+    },
+    {
+      "contract": "TestOnlyCounter",
+      "recordHash": "sha256:73af93c3788e28bc661971c3a6fb8728b7898ffe47b4dc132206feb21e5cdca6",
+      "planHash": "sha256:652d7d496efe7c81ef91f41dcc7e503189358f42821247b9184bf5e59553e1ff",
+      "transactionHash": "0x69deeec55829ac5beefb548811c44f081202ad2c84d33fca267f8d739c20959f",
+      "address": "0xd54115b2c5698aaf468aa3d6623a3dc3a650b47e",
+      "runtimeCodeHash": "0xbddb9a9676370005515236dade4519e5aad554b0a45ba644ccc1a6bb170e4765",
+      "blockNumber": "32072758",
+      "blockHash": "0xee8a91a6153152d0a8362f505db2744d7caa65e20fc274da00be31adf33d732a",
+      "authorizedCaller": null,
+      "receipt": {
+        "transactionHash": "0x69deeec55829ac5beefb548811c44f081202ad2c84d33fca267f8d739c20959f",
+        "explorerUrl": "https://atlantic.pharosscan.xyz/tx/0x69deeec55829ac5beefb548811c44f081202ad2c84d33fca267f8d739c20959f",
+        "status": "success",
+        "blockNumber": "32072758",
+        "blockHash": "0xee8a91a6153152d0a8362f505db2744d7caa65e20fc274da00be31adf33d732a",
+        "confirmationsAtPackaging": "6295",
+        "gasUsed": "221814",
+        "effectiveGasPriceWei": "10000000000",
+        "receiptDerivedFeeWei": "2218140000000000",
+        "independentlyObservedBalanceDebitWei": null,
+        "feeDisclosure": "gasUsed × effectiveGasPrice; not an independently observed account debit"
+      },
+      "verification": {
+        "canonicalTransactionReceiptBlock": true,
+        "sourceBoundRuntime": true,
+        "currentRuntime": true,
+        "authorizedCaller": null
+      }
+    }
+  ],
+  "disclosure": "RPC-backed canonical observations and source-bound runtime checks; not a cryptographic light-client proof."
+}

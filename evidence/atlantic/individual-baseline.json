@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "classification": "VERIFIED ATLANTIC INDIVIDUAL BASELINE",
+  "generatedAt": "2026-10-30T16:39:10.414Z",
+  "network": {
+    "name": "Pharos Atlantic Testnet",
+    "chainId": 688689,
+    "explorer": "https://atlantic.pharosscan.xyz/"
+  },
+  "sourceCommit": "8f704ff29754aec698c22e9a2727a3ea8a7eb65b",
+  "rawSourceReference": {
+    "path": "state/testnet/9e1a695d4ea56394fecdfb757069c281d9799d9fba012fe773d043bb3026b8ab.execution.json",
+    "sha256": "a79e113b603fdf0f320803356f870fc92858eb33919c55f94d82db8339ddc18b",
+    "tracked": false
+  },
+  "planHash": "sha256:9e1a695d4ea56394fecdfb757069c281d9799d9fba012fe773d043bb3026b8ab",
+  "transactionCount": 3,
+  "transactions": [
+    {
+      "id": "baseline-7-0",
+      "payloadHash": "sha256:18ccd2d035782163dc5cdd5d9c3a840649069b5d8bc7feccd1a2343fc6a5c099",
+      "nonce": 7,
+      "sender": "0x299ce4113abf88f4997737184aa8a7a3d58ac15c",
+      "destination": "0xd54115b2c5698aaf468aa3d6623a3dc3a650b47e",
+      "inputMatchesPlan": true,
+      "valueWei": "0",
+      "receipt": {
+        "transactionHash": "0xfcdcff317361ff493756f2dc743077b651d7047a287a151b27485dbaf85984b1",
+        "explorerUrl": "https://atlantic.pharosscan.xyz/tx/0xfcdcff317361ff493756f2dc743077b651d7047a287a151b27485dbaf85984b1",
+        "status": "success",
+        "blockNumber": "32078104",
+        "blockHash": "0xe39314845518af06e0e738cf660efe23a3c2e5ad84e067d8767cd9cdf9d56513",
+        "confirmationsAtPackaging": "950",
+        "gasUsed": "45657",
+        "effectiveGasPriceWei": "10000000000",
+        "receiptDerivedFeeWei": "456570000000000",
+        "independentlyObservedBalanceDebitWei": null,
+        "feeDisclosure": "gasUsed × effectiveGasPrice; not an independently observed account debit"
+      },
+      "eventSummary": {
+        "ValueSet": 1,
+        "key": "0x479ba742f07b2c5a9718627f878bd4ae3cab2ef8bca988db8a129e44a2e98b6b",
+        "value": "10"
+      },
+      "postState": {
+        "key": "0x479ba742f07b2c5a9718627f878bd4ae3cab2ef8bca988db8a129e44a2e98b6b",
+        "value": "10"
+      }
+    },
+    {
+      "id": "baseline-7-1",
+      "payloadHash": "sha256:2a4922294f5e8d924f4178f526058c59e8e82031038e2d495b29e92d3cd2de74",
+      "nonce": 8,
+      "sender": "0x299ce4113abf88f4997737184aa8a7a3d58ac15c",
+      "destination": "0xd54115b2c5698aaf468aa3d6623a3dc3a650b47e",
+      "inputMatchesPlan": true,
+      "valueWei": "0",
+      "receipt": {
+        "transactionHash": "0x506815a65f1547de7df308caec1adf87a2816239bc245f112023c6383bc1f4f1",
+        "explorerUrl": "https://atlantic.pharosscan.xyz/tx/0x506815a65f1547de7df308caec1adf87a2816239bc245f112023c6383bc1f4f1",
+        "status": "success",
+        "blockNumber": "32078114",
+        "blockHash": "0x10d0685dc7ee91fb57eb3f142bac8123572627daa32e9f04119cfdc34d8eb2f5",
+        "confirmationsAtPackaging": "941",
+        "gasUsed": "45657",
+        "effectiveGasPriceWei": "10000000000",
+        "receiptDerivedFeeWei": "456570000000000",
+        "independentlyObservedBalanceDebitWei": null,
+        "feeDisclosure": "gasUsed × effectiveGasPrice; not an independently observed account debit"
+      },
+      "eventSummary": {
+        "ValueSet": 1,
+        "key": "0x696edb67c1f4410db959baa9f9da537b3f1885b3163acb738a34bde0079621a9",
+        "value": "11"
+      },
+      "postState": {
+        "key": "0x696edb67c1f4410db959baa9f9da537b3f1885b3163acb738a34bde0079621a9",
+        "value": "11"
+      }
+    },
+    {
+      "id": "baseline-7-2",
+      "payloadHash": "sha256:886e561ef3593daa7dd04d42fc4ce1183612ff83373ed4da61c935845be78ca8",
+      "nonce": 9,
+      "sender": "0x299ce4113abf88f4997737184aa8a7a3d58ac15c",
+      "destination": "0xd54115b2c5698aaf468aa3d6623a3dc3a650b47e",
+      "inputMatchesPlan": true,
+      "valueWei": "0",
+      "receipt": {
+        "transactionHash": "0xd54f3ea4c6b05abc2ef98c7c5123dc359239a1bf48d7a4b2a4e7211cf05cb18c",
+        "explorerUrl": "https://atlantic.pharosscan.xyz/tx/0xd54f3ea4c6b05abc2ef98c7c5123dc359239a1bf48d7a4b2a4e7211cf05cb18c",
+        "status": "success",
+        "blockNumber": "32078123",
+        "blockHash": "0x5d9b28f3cc024f9e1c3b7b6fcb70aeb1b932fb56957e5780260c8a36a928088a",
+        "confirmationsAtPackaging": "932",
+        "gasUsed": "45645",
+        "effectiveGasPriceWei": "10000000000",
+        "receiptDerivedFeeWei": "456450000000000",
+        "independentlyObservedBalanceDebitWei": null,
+        "feeDisclosure": "gasUsed × effectiveGasPrice; not an independently observed account debit"
+      },
+      "eventSummary": {
+        "ValueSet": 1,
+        "key": "0xc46af92188bab37d5adec9ed5f310b1e25008d61485cd79aa816cb6eb6a70991",
+        "value": "12"
+      },
+      "postState": {
+        "key": "0xc46af92188bab37d5adec9ed5f310b1e25008d61485cd79aa816cb6eb6a70991",
+        "value": "12"
+      }
+    }
+  ],
+  "actualGasUsedTotal": "136959",
+  "receiptDerivedFeeWeiTotal": "1369590000000000",
+  "approvalState": "CLAIMED",
+  "journal": [
+    {
+      "index": 0,
+      "state": "INTENT",
+      "nonce": 7,
+      "transactionHash": "0xfcdcff317361ff493756f2dc743077b651d7047a287a151b27485dbaf85984b1"
+    },
+    {
+      "index": 0,
+      "state": "SUBMITTED",
+      "nonce": 7,
+      "transactionHash": "0xfcdcff317361ff493756f2dc743077b651d7047a287a151b27485dbaf85984b1"
+    },
+    {
+      "index": 0,
+      "state": "CONFIRMED",
+      "nonce": 7,
+      "transactionHash": "0xfcdcff317361ff493756f2dc743077b651d7047a287a151b27485dbaf85984b1"
+    },
+    {
+      "index": 1,
+      "state": "INTENT",
+      "nonce": 8,
+      "transactionHash": "0x506815a65f1547de7df308caec1adf87a2816239bc245f112023c6383bc1f4f1"
+    },
+    {
+      "index": 1,
+      "state": "SUBMITTED",
+      "nonce": 8,
+      "transactionHash": "0x506815a65f1547de7df308caec1adf87a2816239bc245f112023c6383bc1f4f1"
+    },
+    {
+      "index": 1,
+      "state": "CONFIRMED",
+      "nonce": 8,
+      "transactionHash": "0x506815a65f1547de7df308caec1adf87a2816239bc245f112023c6383bc1f4f1"
+    },
+    {
+      "index": 2,
+      "state": "INTENT",
+      "nonce": 9,
+      "transactionHash": "0xd54f3ea4c6b05abc2ef98c7c5123dc359239a1bf48d7a4b2a4e7211cf05cb18c"
+    },
+    {
+      "index": 2,
+      "state": "SUBMITTED",
+      "nonce": 9,
+      "transactionHash": "0xd54f3ea4c6b05abc2ef98c7c5123dc359239a1bf48d7a4b2a4e7211cf05cb18c"
+    },
+    {
+      "index": 2,
+      "state": "CONFIRMED",
+      "nonce": 9,
+      "transactionHash": "0xd54f3ea4c6b05abc2ef98c7c5123dc359239a1bf48d7a4b2a4e7211cf05cb18c"
+    }
+  ],
+  "unresolvedHashes": false
+}

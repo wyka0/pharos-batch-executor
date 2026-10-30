@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "classification": "TRACKED SANITIZED ATLANTIC EVIDENCE",
+  "generatedAt": "2026-10-30T16:39:10.414Z",
+  "sourceCommit": "8f704ff29754aec698c22e9a2727a3ea8a7eb65b",
+  "network": {
+    "name": "Pharos Atlantic Testnet",
+    "chainId": 688689
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "a976a4381717508913f4bac66b192fdc481e3faf140323ccea9cb8c4765d7589",
+      "bytes": 1935
+    },
+    {
+      "path": "deployments.json",
+      "sha256": "b8dd7f5ad4ca626cb53423fb598b52e9386ccc42176b92d89f9e59fc5fe963a9",
+      "bytes": 3690
+    },
+    {
+      "path": "gas-comparison.json",
+      "sha256": "9fb611a0fde957d25c88b7cbf7e71beefe43f5aae663c49b615023301b351d99",
+      "bytes": 1691
+    },
+    {
+      "path": "individual-baseline.json",
+      "sha256": "2e75d1f930372abb94826026511f8b4803fd62114b204369fa103ee25a585865",
+      "bytes": 6510
+    },
+    {
+      "path": "partial-failure.json",
+      "sha256": "d26866a9984f66b78096a91b04192f8c7faf3ae566a85791b4a1152d08de00f7",
+      "bytes": 3878
+    },
+    {
+      "path": "success-batch.json",
+      "sha256": "e94cc9c53045c014b066445528e94f477c2c11bf0b11cd1e7d3aee517b3f897b",
+      "bytes": 3726
+    }
+  ],
+  "manifestSelfIncluded": false,
+  "rawSourcesIncluded": false,
+  "secretsIncluded": false
+}

@@ -5,11 +5,12 @@ An installable `SKILL.md` package and TypeScript/Solidity implementation for
 Pharos **Atlantic Testnet (688689)**. Default operation is simulation; live
 signing and broadcasting require a fresh, explicitly approved full-plan hash.
 
-> **Status:** deployer-authorized hardening is local and uncommitted. The saved
-> local EVM proof is **pre-hardening**, not gas/deployment proof for the revised
-> contract. No fresh local-chain or Atlantic deployment/broadcast is claimed.
-> This is testnet software, **not an independently audited mainnet product**.
-> See [submission status](SUBMISSION.md).
+> **Status:** deployer-authorized hardening is committed and verified on Pharos
+> Atlantic Testnet. The tracked [Atlantic evidence bundle](evidence/atlantic/README.md)
+> records deployments, a three-action success batch, a partial-failure batch and
+> a controlled individual baseline. The saved local EVM proof remains separately
+> labeled **pre-hardening**. This is testnet software, **not an independently
+> audited mainnet product**. See [submission status](SUBMISSION.md).
 
 ## Historical execution-only result — pre-hardening
 
@@ -32,8 +33,8 @@ First-use gas is different: the historical executor deployment cost **740,669**
 gas, and common test-target setup cost **221,814**. Including that setup gives
 **495,756 individual vs 1,198,393 batch gas**, a **702,637-gas batch premium**.
 Deployment would amortize after roughly **20 similar batches only if** the old
-38,032-gas execution saving persisted. [Full accounting and strict comparison
-requirements](docs/evidence.md); revised-contract gas remains unmeasured.
+38,032-gas execution saving persisted. This historical arithmetic is not applied
+to the revised contract. [Full accounting and strict comparison requirements](docs/evidence.md).
 
 The saved local demonstration contains 14 observed local submissions: two setup
 deployments, six baseline writes, five scenario batches, and one refund
@@ -41,14 +42,39 @@ withdrawal. These are historical local-chain observations, not Atlantic
 execution evidence. Setup/baseline/withdrawal costs are not hidden inside the
 one-batch execution count.
 
+## Verified Atlantic testnet evidence — current contract
+
+Chain **688689**, deployed by
+`0x299Ce4113abF88F4997737184aa8A7a3D58AC15C`:
+
+- BatchExecutor [`0xF250…4032`](https://atlantic.pharosscan.xyz/address/0xF25013Db14c8B412191FF5f0606649A23D974032),
+  deployed in [`0x0a54…dd0c`](https://atlantic.pharosscan.xyz/tx/0x0a548e5592cb051884dc54187279fe2830dbb8197976b3e66320a104efebdd0c).
+- TestOnlyCounter [`0xD541…b47E`](https://atlantic.pharosscan.xyz/address/0xD54115B2c5698AAf468aa3d6623A3Dc3A650b47E),
+  deployed in [`0x69de…959f`](https://atlantic.pharosscan.xyz/tx/0x69deeec55829ac5beefb548811c44f081202ad2c84d33fca267f8d739c20959f).
+- Three-action success batch [`0xf5c6…2992`](https://atlantic.pharosscan.xyz/tx/0xf5c66a8a443ca582ac418d4cfbc3e24aad67be90e2cc356a676a57a755c62992):
+  one outer transaction, three successful writes, **133,722 gas**.
+- Partial-failure batch [`0xbe3c…32e8`](https://atlantic.pharosscan.xyz/tx/0xbe3c0a33847734fc2ddadb47906a7f3653f109ffad81ffce1043f1014a5032e8):
+  success / deliberate failure / success, outer receipt successful, **110,637 gas**.
+- Controlled three-transaction baseline: **136,959 gas** total across
+  [`0xfcdc…84b1`](https://atlantic.pharosscan.xyz/tx/0xfcdcff317361ff493756f2dc743077b651d7047a287a151b27485dbaf85984b1),
+  [`0x5068…4f1`](https://atlantic.pharosscan.xyz/tx/0x506815a65f1547de7df308caec1adf87a2816239bc245f112023c6383bc1f4f1)
+  and [`0xd54f…b18c`](https://atlantic.pharosscan.xyz/tx/0xd54f3ea4c6b05abc2ef98c7c5123dc359239a1bf48d7a4b2a4e7211cf05cb18c).
+
+For the controlled live comparison, the batch used **3,237 less receipt gas /
+2.3635%** and reduced execution transaction count **3→1 / 66.67%**. This is an
+equivalent-fresh-storage comparison at different blocks—not an identical-state,
+same-block or snapshot-restored benchmark. It is specific to these transactions,
+not a guaranteed or universal saving. Receipt-derived fees are arithmetic, not
+independently observed balance debits. [Evidence and hashes](evidence/atlantic/README.md).
+
 ## Arena requirements
 
 | Requirement | Implementation and proof |
 |---|---|
 | At least 3 independent actions | Strict 3–32 validation; explicit independence and unique IDs |
 | Genuine batching | One payable `execute(Action[])` transaction; no sequential-send disguise |
-| Gas saving / step reduction | Frozen pre-hardening execution-only receipts; current strict comparison gates, labeled estimates and counts |
-| Clear partial failure | One ordered result event per action; bounded gas/return data; later effects asserted |
+| Gas saving / step reduction | Current Atlantic controlled comparison: 136,959 individual vs 133,722 batch gas; 3→1 transactions, with limitations disclosed |
+| Clear partial failure | Verified Atlantic success/failure/success receipt; one ordered result event per action and later state effect |
 
 ## Quick start
 
@@ -68,7 +94,8 @@ npm run cli -- validate --actions examples/model-actions.json
 unit tests and Solidity tests, builds the production CLI and scans public files.
 It uses only test-generated in-memory signatures and Foundry's in-process test
 EVM; it does not load real-wallet configuration, start Anvil/RPC or submit network
-transactions. Foundry may download solc if it is not cached.
+transactions. Contract builds run offline and require Solidity 0.8.24 in the
+local Foundry cache.
 Offline production smoke checks also verify compiled CLI behavior, portable
 declarations and the SHA-256 manifest of the saved local proof.
 
@@ -179,8 +206,10 @@ a production-only npm install is not a substitute for that setup.
   signer tampering, uncertain submissions, failures, bounds and fuzz coverage.
 - [`docs/`](docs/): [architecture](docs/architecture.md), [failure semantics](docs/failures.md),
   [security](docs/security.md), [evidence methodology](docs/evidence.md).
+- [`evidence/atlantic/`](evidence/atlantic/): sanitized live deployment, batch,
+  partial-failure and controlled-baseline evidence with a SHA-256 manifest.
 
-Raw runs and execution state stay local and ignored by Git. Only reviewed,
-clearly labeled `evidence/local/` proof is curated for publication. The package
-uses a publication allowlist; environment files and raw signed payloads are
-excluded. MIT licensed; [security reporting](SECURITY.md).
+Raw runs and execution state stay local and ignored by Git. Reviewed,
+clearly labeled proof is curated under `evidence/local/` (historical Anvil) and
+`evidence/atlantic/` (sanitized live testnet summaries). Environment files and
+raw signed payloads are excluded. MIT licensed; [security reporting](SECURITY.md).
