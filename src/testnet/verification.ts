@@ -13,8 +13,12 @@ export async function verifyPlannedReceipt(
   plan: BroadcastPlan, tx: PlannedTransaction, hash: Hash, raw: ReceiptLike, client: EvmPublicClient,
 ): Promise<ActualReceipt> {
   if (await client.getChainId() !== ATLANTIC.chainId) throw new ExecutionGateError('Receipt RPC chain ID mismatch.');
-  verifyTransaction(await client.getTransaction({ hash }), { hash, from: plan.sender,
+  const observed = await client.getTransaction({ hash });
+  verifyTransaction(observed, { hash, from: plan.sender,
     ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: decimal(tx.valueWei), chainId: 688689, nonce: tx.nonce });
+  if (plan.schemaVersion === 2 && (observed.type !== tx.type || observed.gas !== decimal(tx.gasLimit) || observed.gasPrice !== decimal(plan.gasPriceWei))) {
+    throw new ExecutionGateError('Mined transaction type or gas parameters differ from the approved payload.');
+  }
   if (raw.blockNumber === undefined) throw new ExecutionGateError('Missing receipt block.');
   const block = await client.getBlock({ blockNumber: raw.blockNumber });
   if (block.hash === null) throw new ExecutionGateError('Missing canonical block hash.');

@@ -3,10 +3,17 @@ import { keccak256 } from 'viem';
 import { describe, expect, it } from 'vitest';
 import { minimumBatchTransactionGas, requiredExecutionGas } from '../src/limits.js';
 import { preparePlan } from '../src/plan.js';
-import { broadcastPlanHash, MAX_TRANSACTION_GAS, verifyApproval } from '../src/testnet/broadcast-plan.js';
+import { broadcastPlanHash, MAX_TRANSACTION_GAS, transactionPayloadHash, verifyApproval, type BroadcastPlan } from '../src/testnet/broadcast-plan.js';
 import { validateActions } from '../src/validation.js';
 import { batchPlan } from './broadcast-fixtures.js';
 import { threeActions } from './fixtures.js';
+
+/** Re-stamp the complete payload hash after synthetic mutation of the plan. */
+function reseal(plan: BroadcastPlan): void {
+  const tx = plan.transactions[0]!;
+  tx.type = 'legacy';
+  tx.payloadHash = transactionPayloadHash(plan, tx);
+}
 
 function planWith(count: number, gasLimit: bigint) {
   const plan = batchPlan();
@@ -19,6 +26,7 @@ function planWith(count: number, gasLimit: bigint) {
   plan.gasEstimates = { blockNumber: '10', batch: '1000000', individual: actions.map((a) => ({ id: a.id, gas: '30000' })) };
   Object.assign(plan.transactions[0]!, { data: prepared.batchCalldata, estimatedGas: '1000000', gasLimit: MAX_TRANSACTION_GAS.toString() });
   plan.maximumCostWei = (MAX_TRANSACTION_GAS * BigInt(plan.gasPriceWei)).toString();
+  reseal(plan);
   return { plan, prepared };
 }
 
@@ -53,6 +61,7 @@ describe('coupled action count and runner gas bounds', () => {
     const minimum = minimumBatchTransactionGas(prepared.actions, prepared.batchCalldata);
     Object.assign(plan.transactions[0]!, { gasLimit: (minimum - 1n).toString(), estimatedGas: (minimum - 2n).toString() });
     plan.maximumCostWei = ((minimum - 1n) * BigInt(plan.gasPriceWei)).toString();
+    reseal(plan);
     expect(() => verifyApproval(plan, broadcastPlanHash(plan), true)).toThrow(/intrinsic\/calldata gas/);
   });
 });

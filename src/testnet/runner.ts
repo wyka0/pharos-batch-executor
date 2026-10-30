@@ -1,4 +1,5 @@
 import { keccak256, parseTransaction, recoverTransactionAddress, type Address, type Hash, type Hex, type Log, type TransactionSerializedLegacy } from 'viem';
+import path from 'node:path';
 import type { EvmPublicClient } from '../adapters/evm.js';
 import { EvmAdapter } from '../adapters/evm.js';
 import { loadArtifact, type ContractArtifact } from '../artifacts.js';
@@ -10,6 +11,9 @@ import type { ActionResult, ActualReceipt, ExecutionComparison } from '../types.
 import { validateActions } from '../validation.js';
 import { broadcastPlanHash, canonicalJson, decimal, verifyApproval, type BroadcastPlan, type PlannedTransaction } from './broadcast-plan.js';
 import type { ExecutionJournal } from './journal.js';
+import { deploymentBinding, type DeploymentStore } from './deployments.js';
+import { feeEvidence, type FeeEvidence } from './fees.js';
+import type { DeploymentBinding } from './broadcast-plan.js';
 import type { TestnetSigner } from './signer.js';
 import { planComparison } from './comparison.js';
 import { planActions, verifyPlannedEffects, verifyPlannedReceipt } from './verification.js';
@@ -19,6 +23,7 @@ export interface RunnerReadClient extends EvmPublicClient {
   getGasPrice(): Promise<bigint>;
 }
 export interface RunnerClient extends RunnerReadClient {
+  getTransactionReceipt(args: { hash: Hash }): Promise<(ReceiptLike & { logs: readonly Log[] }) | null>;
   sendRawTransaction(args: { serializedTransaction: Hex }): Promise<Hash>;
 }
 
@@ -32,6 +37,8 @@ export interface ExecutionStep {
   actions?: ActionResult[];
   refundCreditWei?: bigint;
   expectedOutcomesMatch?: boolean;
+  deploymentRecord?: DeploymentBinding;
+  fees?: FeeEvidence;
   error?: string;
 }
 export interface TestnetExecutionEvidence {
@@ -45,6 +52,7 @@ export interface TestnetExecutionEvidence {
 export interface RunnerDependencies {
   client: RunnerClient;
   journal: ExecutionJournal;
+  deployments: DeploymentStore;
   signerLoader(): Promise<TestnetSigner>;
   artifactLoader?: typeof loadArtifact;
   now?: () => number;
@@ -61,13 +69,22 @@ export async function executeApprovedPlan(
   const now = deps.now ?? Date.now;
   verifyApproval(plan, approvalHash, confirmed, now());
   const hash = broadcastPlanHash(plan);
+  deps.journal.assertPlan(plan);
+  if (path.relative(deps.journal.directory, deps.deployments.directory) !== '') throw new ExecutionGateError('Journal and deployment records must share one durable state directory.');
   const artifacts = await artifactBindings(plan, deps.artifactLoader ?? loadArtifact);
-  await preflight(plan, deps.client, artifacts);
-  await deps.journal.acquire(plan.sender, plan.transactions.map((tx) => tx.nonce));
+  try {
+    await deps.deployments.verifyPrerequisites(plan, deps.client, deps.artifactLoader);
+    if (plan.purpose === 'deploy') await deps.deployments.assertAvailable(plan.sender, plan.deploymentStage!);
+    await preflight(plan, deps.client, artifacts);
+    await deps.journal.acquire(plan.sender, plan.transactions.map((tx) => tx.nonce));
+  } catch (error) {
+    if (error instanceof ExecutionGateError) throw error;
+    throw new ExecutionGateError('Read-only preflight or durable-state acquisition failed; no signing or submission attempted.');
+  }
   const evidence: TestnetExecutionEvidence = {
     schemaVersion: 1, classification: 'ATLANTIC TESTNET', planHash: hash, plan,
     startedAt: new Date(now()).toISOString(), state: 'RUNNING',
-    steps: plan.transactions.map((tx, index) => ({ id: tx.id, index, state: 'NOT_SUBMITTED',
+    steps: plan.transactions.map((tx, index) => ({ id: tx.id, index, state: 'NOT_SUBMITTED', fees: feeEvidence(plan, tx),
       ...(plan.actions === undefined ? {} : { actions: planActions(plan, index) }) })),
     disclosures: [
       'Hashes in INTENT/UNKNOWN/ABORTED_BEFORE_SEND are computed offline; they are not claims of successful broadcast or deployment.',
@@ -76,12 +93,17 @@ export async function executeApprovedPlan(
       'Unknown or unverified submissions are never retried; remaining transactions stay NOT_SUBMITTED.',
       'ABORTED_BEFORE_SEND means the final approval guard refused before the RPC call; durable sender/nonce intents remain and cannot be reused automatically.',
       'Simulation is a prediction, not an execution guarantee. Observed action results may differ and are reported explicitly.',
+      'Each deployment stage consumes its own approval and stops after that single transaction. No following stage or batch is authorized.',
+      'Receipt-derived gasUsed * effectiveGasPrice is not an independently observed balance debit. Atlantic fee settlement remains unresolved.',
     ],
     ...(planComparison(plan) === undefined ? {} : { comparison: planComparison(plan) }),
   };
   const persist = async () => { await deps.onEvidence(structuredClone(evidence)); };
   let interrupted = false;
   try {
+    verifyApproval(plan, approvalHash, confirmed, now());
+    await deps.journal.claimApproval(plan, new Date(now()).toISOString());
+    if (plan.purpose === 'deploy') await deps.deployments.claim(plan, new Date(now()).toISOString());
     await persist();
     verifyApproval(plan, approvalHash, confirmed, now());
     const signer = await deps.signerLoader();
@@ -89,15 +111,15 @@ export async function executeApprovedPlan(
       const step = evidence.steps[index]!;
       try {
         // Revalidate time, chain, nonce, code and remaining budget immediately
-        // before EACH attempt. Approval of the first setup transaction never
-        // authorizes a changed second transaction.
+        // before EACH attempt. Deployment plans contain exactly ONE stage.
         verifyApproval(plan, approvalHash, confirmed, now());
+        await deps.deployments.verifyPrerequisites(plan, deps.client, deps.artifactLoader);
         await beforeStep(plan, index, deps.client);
         await freshEstimate(plan, tx, deps.client);
         if (plan.purpose === 'batch') await assertSimulation(plan, deps.client, artifacts.BatchExecutor);
         verifyApproval(plan, approvalHash, confirmed, now());
         const raw = await signer.sign({
-          chainId: 688689, type: 'legacy', nonce: tx.nonce,
+          chainId: 688689, type: tx.type!, nonce: tx.nonce,
           ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: decimal(tx.valueWei),
           gas: decimal(tx.gasLimit), gasPrice: decimal(plan.gasPriceWei),
         });
@@ -105,6 +127,7 @@ export async function executeApprovedPlan(
         // A signer bug cannot silently change recipient, chain or fee limits.
         await verifySignedPayload(raw, tx, plan);
         verifyApproval(plan, approvalHash, confirmed, now());
+        await deps.deployments.verifyPrerequisites(plan, deps.client, deps.artifactLoader);
         await beforeStep(plan, index, deps.client);
         const transactionHash = keccak256(raw);
         step.transactionHash = transactionHash;
@@ -151,10 +174,12 @@ export async function executeApprovedPlan(
         step.rawReceipt = receipt;
         try {
           step.receipt = await verifyPlannedReceipt(plan, tx, transactionHash, receipt, deps.client);
+          step.fees = feeEvidence(plan, tx, step.receipt);
           if (step.receipt.status === 'reverted') {
             step.state = 'REVERTED'; step.error = 'Outer transaction reverted; no action effects committed.';
           } else {
             Object.assign(step, await verifyPlannedEffects(plan, tx, receipt, step.receipt, deps.client));
+            if (tx.kind === 'deployment') step.deploymentRecord = deploymentBinding(await deps.deployments.save(plan, transactionHash, step.receipt, step.deployedAddress!, new Date(now()).toISOString()));
             if (tx.kind === 'batch') step.expectedOutcomesMatch = canonicalJson(step.actions!.map((a) => ({
               id: a.id, success: a.success, returnData: a.returnData, returnDataSize: a.returnDataSize!.toString(),
             }))) === canonicalJson(plan.expectedSimulation);
@@ -170,6 +195,10 @@ export async function executeApprovedPlan(
         // If INTENT/SUBMITTED was reached, a potentially sent transaction must
         // remain UNKNOWN, never be reclassified as safe-to-send.
         if (step.state === 'INTENT' || step.state === 'SUBMITTED') step.state = 'UNKNOWN';
+        if (step.state === 'NOT_SUBMITTED') {
+          step.state = 'ABORTED_BEFORE_SEND';
+          try { await deps.journal.abortBeforeIntent(new Date(now()).toISOString()); } catch { /* The immutable approval/reservation still blocks reuse. */ }
+        }
         step.error = step.state === 'ABORTED_BEFORE_SEND' ? 'Submission aborted before the RPC call; abort persistence failed. Preserve durable intent; do not retry.' : step.state === 'UNKNOWN' ? 'Execution interrupted after intent; manual reconciliation required.' : step.state === 'CONFIRMED' || step.state === 'REVERTED' || step.state === 'UNVERIFIED'
           ? 'Execution halted after receipt collection because evidence persistence failed. Preserve the existing hash and reconcile.'
           : 'Approval, pre-submission safety, signing, or persistence check failed; no transaction attempted for this step.';
@@ -194,7 +223,11 @@ export async function executeApprovedPlan(
     evidence.state = 'HALTED';
     evidence.finishedAt = new Date(now()).toISOString();
     for (const step of evidence.steps) {
-      if (step.state === 'NOT_SUBMITTED') step.error = 'Approval, signing configuration or evidence persistence refused; this transaction was not submitted.';
+      if (step.state === 'NOT_SUBMITTED') {
+        step.state = 'ABORTED_BEFORE_SEND';
+        step.error = 'Approval, signing configuration or evidence persistence refused before submission. Consumed approvals and reservations are retained.';
+        try { await deps.journal.abortBeforeIntent(new Date(now()).toISOString()); } catch { /* Preserve any existing claim; never retry. */ }
+      }
       if (step.state === 'INTENT' || step.state === 'SUBMITTED') {
         step.state = 'UNKNOWN'; step.error = 'Interrupted after intent; reconcile the existing hash, never resend.';
       }
@@ -223,7 +256,8 @@ async function preflight(plan: BroadcastPlan, client: RunnerReadClient, artifact
 }
 
 async function freshEstimate(plan: BroadcastPlan, tx: PlannedTransaction, client: EvmPublicClient) {
-  const gas = await client.estimateGas({ account: plan.sender, ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: decimal(tx.valueWei), gas: decimal(tx.gasLimit) });
+  const gas = await client.estimateGas({ account: plan.sender, type: tx.type, nonce: tx.nonce, gasPrice: decimal(plan.gasPriceWei),
+    ...(tx.to === null ? {} : { to: tx.to }), data: tx.data, value: decimal(tx.valueWei), gas: decimal(tx.gasLimit) });
   if (gas > decimal(tx.gasLimit)) throw new ExecutionGateError('Fresh gas estimate exceeds approved bound.');
 }
 
@@ -244,11 +278,18 @@ async function beforeStep(plan: BroadcastPlan, index: number, client: RunnerRead
     client.getBalance({ address: plan.sender }), client.getGasPrice(), client.getBlockNumber(),
   ]);
   if (pending !== plan.transactions[index]!.nonce || pending !== latest) throw new ExecutionGateError('Nonce changed or wallet has an unresolved pending transaction.');
+  const senderCode = await client.getCode({ address: plan.sender });
+  if (senderCode !== undefined && senderCode !== '0x') throw new ExecutionGateError('Reviewed direct-wallet sender is no longer code-empty.');
   if (gasPrice > decimal(plan.gasPriceWei)) throw new ExecutionGateError('Gas price is above the explicitly approved price.');
   const remaining = plan.transactions.slice(index).reduce((sum, tx) => sum + decimal(tx.gasLimit) * decimal(plan.gasPriceWei) + decimal(tx.valueWei), 0n);
   if (balance < remaining) throw new ExecutionGateError('Insufficient balance for remaining approved gas/value ceiling.');
   const block = await client.getBlock({ blockNumber });
   if (plan.transactions.slice(index).some((tx) => decimal(tx.gasLimit) > block.gasLimit)) throw new ExecutionGateError('Approved transaction exceeds current block gas limit.');
+  if (plan.purpose === 'deploy') {
+    const address = plan.transactions[index]!.expectedContractAddress!;
+    const [code, nonce] = await Promise.all([client.getCode({ address }), client.getTransactionCount({ address, blockTag: 'latest' })]);
+    if ((code !== undefined && code !== '0x') || nonce !== 0) throw new ExecutionGateError('Predicted CREATE destination is occupied; no duplicate deployment.');
+  }
   if (plan.targetCodeHashes) for (const [address, hash] of Object.entries(plan.targetCodeHashes)) {
     if (keccak256((await client.getCode({ address: address as Address })) ?? '0x') !== hash) throw new ExecutionGateError('Target code changed since approval.');
   }

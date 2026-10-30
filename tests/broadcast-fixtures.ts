@@ -2,11 +2,11 @@
 import { getContractAddress, keccak256, type Address } from 'viem';
 import { ATLANTIC } from '../src/network.js';
 import { preparePlan } from '../src/plan.js';
-import type { BroadcastPlan } from '../src/testnet/broadcast-plan.js';
+import { DEPLOYMENT_ARTIFACTS, transactionPayloadHash, type BroadcastPlan, type DeploymentBinding, type DeploymentStage } from '../src/testnet/broadcast-plan.js';
 import { validateActions } from '../src/validation.js';
 import { ACCOUNT, EXECUTOR, threeActions } from './fixtures.js';
 
-export function deployPlan(sender: Address = ACCOUNT): BroadcastPlan {
+export function legacyDeployPlan(sender: Address = ACCOUNT): BroadcastPlan {
   const now = Date.now();
   return {
     schemaVersion: 1, skill: 'pharos-batch-executor', purpose: 'deploy', network: ATLANTIC, sender,
@@ -21,8 +21,8 @@ export function deployPlan(sender: Address = ACCOUNT): BroadcastPlan {
   };
 }
 
-export function batchPlan(sender: Address = ACCOUNT, failedAt = -1): BroadcastPlan {
-  const plan = deployPlan(sender);
+export function legacyBatchPlan(sender: Address = ACCOUNT, failedAt = -1): BroadcastPlan {
+  const plan = legacyDeployPlan(sender);
   const actions = validateActions(threeActions());
   const prepared = preparePlan(actions);
   plan.purpose = 'batch';
@@ -37,4 +37,35 @@ export function batchPlan(sender: Address = ACCOUNT, failedAt = -1): BroadcastPl
     data: prepared.batchCalldata, valueWei: '0', estimatedGas: '800000', gasLimit: '960000' }];
   plan.maximumCostWei = '9600000000000000';
   return plan;
+}
+
+export function sealPayloads(plan: BroadcastPlan): BroadcastPlan {
+  for (const tx of plan.transactions) { tx.type = 'legacy'; tx.payloadHash = transactionPayloadHash(plan, tx); }
+  plan.maximumCostWei = plan.transactions.reduce((sum, tx) => sum + BigInt(tx.gasLimit) * BigInt(plan.gasPriceWei) + BigInt(tx.valueWei), 0n).toString();
+  return plan;
+}
+
+export function fixtureBinding(address: Address = EXECUTOR): DeploymentBinding {
+  return { recordHash: `sha256:${'aa'.repeat(32)}`, planHash: `sha256:${'bb'.repeat(32)}`, transactionHash: `0x${'ab'.repeat(32)}`,
+    address, runtimeCodeHash: keccak256('0x00'), blockNumber: '9', blockHash: `0x${'cd'.repeat(32)}` };
+}
+
+export function deployPlan(sender: Address = ACCOUNT, stage: DeploymentStage = 'executor', nonce = 0, prerequisite = fixtureBinding()): BroadcastPlan {
+  const plan = legacyDeployPlan(sender);
+  plan.schemaVersion = 2;
+  plan.deploymentStage = stage;
+  plan.transactions = [plan.transactions[stage === 'executor' ? 0 : 1]!];
+  const tx = plan.transactions[0]!;
+  tx.nonce = nonce;
+  tx.artifactName = DEPLOYMENT_ARTIFACTS[stage];
+  tx.expectedContractAddress = getContractAddress({ from: sender, nonce: BigInt(nonce) });
+  if (stage === 'counter') plan.deploymentPrerequisites = { executor: prerequisite };
+  return sealPayloads(plan);
+}
+
+export function batchPlan(sender: Address = ACCOUNT, failedAt = -1): BroadcastPlan {
+  const plan = legacyBatchPlan(sender, failedAt);
+  plan.schemaVersion = 2;
+  plan.deploymentPrerequisites = { executor: fixtureBinding(), counter: fixtureBinding('0x6666666666666666666666666666666666666666') };
+  return sealPayloads(plan);
 }

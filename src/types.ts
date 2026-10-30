@@ -55,6 +55,7 @@ export interface ActualReceipt {
   /** Canonical block count binds mining order across baseline block boundaries. */
   blockTransactionCount?: number;
   effectiveGasPrice: bigint;
+  /** Receipt gasUsed * effectiveGasPrice; NOT an independently observed charge. */
   feeWei: bigint;
   confirmations: bigint;
   explorerUrl?: string;

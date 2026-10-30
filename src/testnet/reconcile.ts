@@ -8,6 +8,7 @@ import { planComparison } from './comparison.js';
 import { validateJournalSequence, type JournalEntry } from './journal.js';
 import type { RunnerReadClient } from './runner.js';
 import { planActions, verifyPlannedEffects, verifyPlannedReceipt } from './verification.js';
+import { feeEvidence, type FeeEvidence } from './fees.js';
 
 export interface ReconcileClient extends RunnerReadClient {
   getTransactionReceipt(args: { hash: Hash }): Promise<(ReceiptLike & { logs: readonly Log[] }) | null>;
@@ -19,6 +20,8 @@ export interface ReconciliationStep {
   transactionHash?: Hash; receipt?: ActualReceipt; rawReceipt?: ReceiptLike;
   actions?: ActionResult[]; refundCreditWei?: bigint; deployedAddress?: `0x${string}`;
   error?: string;
+  fees?: FeeEvidence;
+  expectedOutcomesMatch?: boolean;
 }
 
 export interface ReconciliationEvidence {
@@ -43,7 +46,7 @@ export async function reconcilePlan(
   const steps: ReconciliationStep[] = [];
   for (const [index, tx] of plan.transactions.entries()) {
     const transactionHash = hashes.get(index);
-    const step: ReconciliationStep = { index, id: tx.id, state: 'NOT_SUBMITTED',
+    const step: ReconciliationStep = { index, id: tx.id, state: 'NOT_SUBMITTED', fees: feeEvidence(plan, tx),
       ...(plan.purpose === 'deploy' ? {} : { actions: planActions(plan, index) }) };
     steps.push(step);
     if (transactionHash === undefined) {
@@ -71,11 +74,16 @@ export async function reconcilePlan(
       }
       try {
         step.receipt = await verifyPlannedReceipt(plan, tx, transactionHash, raw, client);
+        step.fees = feeEvidence(plan, tx, step.receipt);
         if (step.receipt.status === 'reverted') {
           step.state = 'REVERTED'; step.error = 'Outer transaction reverted. No action effects committed; intermediate calls cannot be inferred from this receipt.';
           markUnknown(step, 'not_committed');
         } else {
           Object.assign(step, await verifyPlannedEffects(plan, tx, raw, step.receipt, client));
+          if (tx.kind === 'batch') step.expectedOutcomesMatch = step.actions!.every((action, i) => {
+            const expected = plan.expectedSimulation![i]!;
+            return action.id === expected.id && action.success === expected.success && action.returnData === expected.returnData && action.returnDataSize?.toString() === expected.returnDataSize;
+          });
           step.state = 'CONFIRMED';
         }
       } catch {
@@ -118,6 +126,7 @@ export async function reconcilePlan(
       'ABORTED_BEFORE_SEND is a local pre-send record, not permission to clear an intent. A visible hash or advanced nonce conflicts with an unsent abort and remains unresolved.',
       'Verification is an RPC-backed observation at this time, not an independent cryptographic light-client proof.',
       'A batch transaction can be confirmed with failed subcalls. Action results are taken from receipt-bound executor events, never replayed eth_call results.',
+      'Receipt gas usage and fee arithmetic are distinct from an independently observed account debit. Atlantic fee settlement remains unresolved.',
     ],
   };
 }

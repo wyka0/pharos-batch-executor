@@ -14,6 +14,20 @@ export const MAX_GAS_PRICE_WEI = 25_000_000_000n;
 export const MAX_TRANSACTION_GAS = 5_000_000n;
 export const PLAN_TTL_MS = 60 * 60 * 1000;
 
+export type DeploymentStage = 'executor' | 'counter';
+export const DEPLOYMENT_ARTIFACTS = { executor: 'BatchExecutor', counter: 'TestOnlyCounter' } as const;
+
+/** Public, immutable record identity. The record AND its chain evidence are reverified. */
+export interface DeploymentBinding {
+  recordHash: string;
+  planHash: string;
+  transactionHash: Hex;
+  address: Hex;
+  runtimeCodeHash: Hex;
+  blockNumber: string;
+  blockHash: Hex;
+}
+
 export interface PlannedTransaction {
   id: string;
   kind: 'deployment' | 'batch' | 'individual';
@@ -23,13 +37,16 @@ export interface PlannedTransaction {
   valueWei: string;
   gasLimit: string;
   estimatedGas: string;
+  /** Required by v2. Optional only to read historical v1 evidence. */
+  type?: 'legacy';
+  payloadHash?: string;
   expectedContractAddress?: Hex;
   artifactName?: 'BatchExecutor' | 'TestOnlyCounter';
   expectedRuntimeCodeHash?: Hex;
 }
 
 export interface BroadcastPlan {
-  schemaVersion: 1;
+  schemaVersion: 1 | 2;
   skill: 'pharos-batch-executor';
   purpose: 'deploy' | 'batch' | 'baseline';
   network: typeof ATLANTIC;
@@ -39,6 +56,8 @@ export interface BroadcastPlan {
   planningBlockNumber: string;
   gasPriceWei: string;
   maximumCostWei: string;
+  deploymentStage?: DeploymentStage;
+  deploymentPrerequisites?: Partial<Record<DeploymentStage, DeploymentBinding>>;
   transactions: PlannedTransaction[];
   actions?: BatchActionInput[];
   batchExecutor?: Hex;
@@ -58,6 +77,15 @@ export function broadcastPlanHash(plan: BroadcastPlan): string {
   return `sha256:${createHash('sha256').update(canonicalJson(plan)).digest('hex')}`;
 }
 
+/** Hashes public unsigned fields, not an Ethereum serialization or signature. */
+export function transactionPayloadHash(plan: Pick<BroadcastPlan, 'network' | 'sender' | 'gasPriceWei'>, tx: PlannedTransaction): string {
+  return `sha256:${createHash('sha256').update(canonicalJson({
+    chainId: plan.network.chainId, sender: plan.sender, type: tx.type,
+    nonce: tx.nonce, to: tx.to ?? null, creation: tx.to == null, data: tx.data,
+    valueWei: tx.valueWei, gasLimit: tx.gasLimit, gasPriceWei: plan.gasPriceWei,
+  })).digest('hex')}`;
+}
+
 export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
   if (value !== null && typeof value === 'object') {
@@ -71,11 +99,16 @@ export function canonicalJson(value: unknown): string {
 
 /** Pure safety gate: runs BEFORE RPC, journal acquisition or key loading. */
 export function verifyApproval(plan: BroadcastPlan, approval: string, confirmed: boolean, now = Date.now()): void {
+  validatePlan(plan, approval, confirmed, now, false);
+}
+
+function validatePlan(plan: BroadcastPlan, approval: string, confirmed: boolean, now: number, historical: boolean): void {
   const fail = (message: string): never => { throw new ExecutionGateError(message); };
-  if (!confirmed) fail('--confirm-atlantic-testnet is required; nothing broadcast.');
-  const fields = new Set(['schemaVersion', 'skill', 'purpose', 'network', 'sender', 'createdAt', 'expiresAt', 'planningBlockNumber', 'gasPriceWei', 'maximumCostWei', 'transactions', 'actions', 'batchExecutor', 'executorRuntimeCodeHash', 'targetCodeHashes', 'expectedSimulation', 'gasEstimates', 'disclosures']);
+  if (confirmed !== true) fail('--confirm-atlantic-testnet is required; nothing broadcast.');
+  const fields = new Set(['schemaVersion', 'skill', 'purpose', 'network', 'sender', 'createdAt', 'expiresAt', 'planningBlockNumber', 'gasPriceWei', 'maximumCostWei', 'transactions', 'deploymentStage', 'deploymentPrerequisites', 'actions', 'batchExecutor', 'executorRuntimeCodeHash', 'targetCodeHashes', 'expectedSimulation', 'gasEstimates', 'disclosures']);
   if (plan === null || typeof plan !== 'object' || Object.keys(plan).some((field) => !fields.has(field))) fail('Unknown/unsafe broadcast-plan fields.');
-  if (plan.schemaVersion !== 1 || plan.skill !== 'pharos-batch-executor') fail('Unsupported broadcast-plan schema.');
+  if ((plan.schemaVersion !== 2 && !(historical && plan.schemaVersion === 1)) || plan.skill !== 'pharos-batch-executor') fail('Execution requires a v2 independently approved plan. V1 plans are historical reconciliation only.');
+  if (plan.schemaVersion === 1 && (plan.deploymentStage !== undefined || plan.deploymentPrerequisites !== undefined)) fail('Invalid historical deployment fields.');
   if (canonicalJson(plan.network) !== canonicalJson(ATLANTIC)) fail('Only official Atlantic Testnet chain 688689 is allowed.');
   validateAddress(plan.sender, 'planned sender');
   if (decimal(plan.planningBlockNumber) <= 0n || !Array.isArray(plan.disclosures) || !plan.disclosures.every((s) => typeof s === 'string')) fail('Invalid plan provenance/disclosures.');
@@ -93,7 +126,7 @@ export function verifyApproval(plan: BroadcastPlan, approval: string, confirmed:
   const ids = new Set<string>();
   let previousNonce: number | undefined;
   for (const tx of plan.transactions) {
-    const transactionFields = new Set(['id', 'kind', 'nonce', 'to', 'data', 'valueWei', 'gasLimit', 'estimatedGas', 'expectedContractAddress', 'artifactName', 'expectedRuntimeCodeHash']);
+    const transactionFields = new Set(['id', 'kind', 'nonce', 'to', 'data', 'valueWei', 'gasLimit', 'estimatedGas', 'type', 'payloadHash', 'expectedContractAddress', 'artifactName', 'expectedRuntimeCodeHash']);
     if (tx === null || typeof tx !== 'object' || Object.keys(tx).some((field) => !transactionFields.has(field))) fail('Unknown/unsafe planned transaction fields.');
     if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(tx.id) || ids.has(tx.id)) fail('Invalid or duplicate transaction identifier.');
     ids.add(tx.id);
@@ -104,14 +137,20 @@ export function verifyApproval(plan: BroadcastPlan, approval: string, confirmed:
     const value = decimal(tx.valueWei);
     if (gas <= 0n || gas > MAX_TRANSACTION_GAS || estimate <= 0n || estimate > gas) fail('Invalid transaction gas bound or estimate.');
     if (!/^0x(?:[0-9a-fA-F]{2})*$/.test(tx.data) || tx.data.length > 1_000_000) fail('Malformed planned calldata.');
+    if (plan.schemaVersion === 2 && (tx.type !== 'legacy' || tx.payloadHash !== transactionPayloadHash(plan, tx))) fail('Missing or inconsistent legacy transaction payload hash.');
+    if (plan.schemaVersion === 1 && (tx.type !== undefined || tx.payloadHash !== undefined)) fail('Invalid historical transaction fields.');
     totalValue += value;
     cost += gas * gasPrice + value;
   }
   if (totalValue > MAX_TOTAL_VALUE_WEI || cost > MAX_TOTAL_COST_WEI || decimal(plan.maximumCostWei) !== cost) fail('Plan exceeds testnet value/cost ceiling or has inconsistent cost.');
 
   if (plan.purpose === 'deploy') {
-    if (plan.transactions.length !== 2) fail('Deployment plan must contain exactly two SETUP transactions, not a batch.');
-    const names = ['BatchExecutor', 'TestOnlyCounter'] as const;
+    if (plan.schemaVersion === 2) {
+      if (plan.transactions.length !== 1 || !['executor', 'counter'].includes(plan.deploymentStage ?? '')) fail('A deployment approval must contain exactly ONE explicitly selected stage.');
+      if ([plan.actions, plan.batchExecutor, plan.executorRuntimeCodeHash, plan.targetCodeHashes, plan.expectedSimulation, plan.gasEstimates].some((field) => field !== undefined)) fail('Deployment approval cannot contain batch execution fields.');
+      validatePrerequisites(plan, plan.deploymentStage === 'counter' ? ['executor'] : []);
+    } else if (plan.transactions.length !== 2) fail('Historical deployment plan must contain exactly two SETUP transactions.');
+    const names = plan.schemaVersion === 2 ? [DEPLOYMENT_ARTIFACTS[plan.deploymentStage!]] : ['BatchExecutor', 'TestOnlyCounter'];
     for (const [i, tx] of plan.transactions.entries()) {
       if (tx.kind !== 'deployment' || tx.to !== null || tx.valueWei !== '0' || tx.artifactName !== names[i]) fail('Invalid deployment transaction.');
       if (!/^0x[0-9a-fA-F]{64}$/.test(tx.expectedRuntimeCodeHash ?? '')) fail('Missing deployment runtime binding.');
@@ -119,6 +158,12 @@ export function verifyApproval(plan: BroadcastPlan, approval: string, confirmed:
       if (address.toLowerCase() !== tx.expectedContractAddress?.toLowerCase()) fail('Predicted deployment address mismatch.');
     }
   } else if (plan.purpose === 'batch' || plan.purpose === 'baseline') {
+    if (plan.schemaVersion === 2) {
+      if (plan.deploymentStage !== undefined) fail('An execution batch or baseline cannot deploy a stage.');
+      validatePrerequisites(plan, ['executor', 'counter']);
+      const executor = plan.deploymentPrerequisites!.executor!;
+      if (plan.batchExecutor?.toLowerCase() !== executor.address.toLowerCase() || plan.executorRuntimeCodeHash !== executor.runtimeCodeHash) fail('Batch executor differs from the verified deployment binding.');
+    }
     const actions = validateActions(plan.actions);
     const prepared = preparePlan(actions);
     validateAddress(plan.batchExecutor, 'executor');
@@ -157,7 +202,28 @@ export function verifyApproval(plan: BroadcastPlan, approval: string, confirmed:
 
 /** Read-only reconciliation accepts expired plans, but never creates approval. */
 export function validateHistoricalPlan(plan: BroadcastPlan): void {
-  verifyApproval(plan, broadcastPlanHash(plan), true, Date.parse(plan.createdAt));
+  validatePlan(plan, broadcastPlanHash(plan), true, Date.parse(plan.createdAt), true);
+}
+
+function validatePrerequisites(plan: BroadcastPlan, stages: readonly DeploymentStage[]): void {
+  const bindings = plan.deploymentPrerequisites;
+  if (stages.length === 0) {
+    if (bindings !== undefined) throw new ExecutionGateError('Stage 1 cannot inherit a deployment approval or prerequisite.');
+    return;
+  }
+  if (bindings === undefined || bindings === null || typeof bindings !== 'object' || Object.keys(bindings).length !== stages.length || Object.keys(bindings).some((key) => !stages.includes(key as DeploymentStage))) {
+    throw new ExecutionGateError('Verified deployment prerequisites are required before this stage or batch.');
+  }
+  for (const stage of stages) {
+    const binding = bindings[stage];
+    if (binding === undefined || binding === null || typeof binding !== 'object' ||
+      Object.keys(binding).sort().join(',') !== ['recordHash', 'planHash', 'transactionHash', 'address', 'runtimeCodeHash', 'blockNumber', 'blockHash'].sort().join(',') ||
+      !/^sha256:[0-9a-f]{64}$/.test(binding.recordHash) || !/^sha256:[0-9a-f]{64}$/.test(binding.planHash) ||
+      ![binding.transactionHash, binding.runtimeCodeHash, binding.blockHash].every((hash) => /^0x[0-9a-fA-F]{64}$/.test(hash)) || decimal(binding.blockNumber) <= 0n) {
+      throw new ExecutionGateError('Invalid verified deployment record binding.');
+    }
+    validateAddress(binding.address, 'verified deployment address');
+  }
 }
 
 export function decimal(value: unknown): bigint {

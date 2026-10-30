@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, open, rename } from 'node:fs/promises';
+import { link, mkdir, open, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { stringifyPublicJson } from './evidence.js';
 
@@ -17,6 +17,11 @@ export async function writePublicState(file: string, value: unknown): Promise<vo
 export async function writePublicSnapshot(file: string, value: unknown): Promise<void> {
   const data = `${stringifyPublicJson(value)}\n`;
   await mkdir(path.dirname(file), { recursive: true });
-  const handle = await open(file, 'wx');
+  const temporary = `${file}.${randomUUID()}.pending`;
+  const handle = await open(temporary, 'wx');
   try { await handle.writeFile(data); await handle.sync(); } finally { await handle.close(); }
+  // Atomic create-without-replacement. A crash leaves either a complete target
+  // or an unreferenced pending file, never a partially written verified record.
+  await link(temporary, file);
+  await unlink(temporary);
 }

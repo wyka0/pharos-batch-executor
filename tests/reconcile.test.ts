@@ -4,7 +4,7 @@ import { broadcastPlanHash, type BroadcastPlan } from '../src/testnet/broadcast-
 import type { JournalEntry } from '../src/testnet/journal.js';
 import { reconcilePlan, type ReconcileClient } from '../src/testnet/reconcile.js';
 import { validateActions } from '../src/validation.js';
-import { batchPlan, deployPlan } from './broadcast-fixtures.js';
+import { legacyBatchPlan as batchPlan, legacyDeployPlan as deployPlan } from './broadcast-fixtures.js';
 import { ACCOUNT } from './fixtures.js';
 import { actionLog, BLOCK_HASH, HASH, rawReceipt, summaryLog } from './receipt-fixtures.js';
 import { CALLER_GETTER_DATA, callerReply } from './caller-fixtures.js';

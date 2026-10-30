@@ -4,7 +4,7 @@ import path from 'node:path';
 import { keccak256 } from 'viem';
 import { root, runForge } from './tooling.mjs';
 
-runForge(['build']);
+runForge(['build', '--offline']);
 await mkdir(path.join(root, 'artifacts'), { recursive: true });
 for (const [name, source] of [
   ['BatchExecutor', 'contracts/BatchExecutor.sol'],

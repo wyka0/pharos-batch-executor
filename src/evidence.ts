@@ -37,7 +37,8 @@ export function renderEvidenceMarkdown(e: BatchRunEvidence): string {
     `- Hash: ${e.batch.transactionHash === undefined ? '**none — nothing broadcast**' : `\`${e.batch.transactionHash}\``}`,
     ...(receipt?.evidence === 'actual' ? [
       `- Receipt: **${receipt.status}**; block **${receipt.blockNumber}**; confirmations **${receipt.confirmations}**`,
-      `- Gas used: **${receipt.gasUsed} (ACTUAL)**; fee: **${receipt.feeWei} wei (ACTUAL)**`,
+      `- Receipt gas used: **${receipt.gasUsed}**; receipt-derived fee calculation: **${receipt.feeWei} wei**`,
+      '- Independently observed balance debit: **unavailable**. Receipt arithmetic does not establish the Atlantic fee-settlement policy.',
       ...(receipt.explorerUrl === undefined ? [] : [`- Explorer: ${receipt.explorerUrl}`]),
     ] : receipt?.evidence === 'simulated' ? [
       `- Reference: \`${receipt.simulationRef}\` — **MODEL ONLY; no blockchain hash or block**`,

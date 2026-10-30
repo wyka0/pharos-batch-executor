@@ -97,10 +97,11 @@ the frozen proof.
     caller getter, then show all predicted action results and label every gas
     estimate. A failed individual estimate is `null`, not
    an invented fallback. A failed batch simulation/estimate blocks execution.
-4. **Request approval.** If deployment is needed, generate
-   `npm run testnet:plan -- --purpose deploy --address <sender>`.
-   This is **two setup transactions**, not the execution batch.
-   For a deployed executor use `--purpose batch --executor <executor>
+4. **Request approval.** If deployment is needed, generate a stage plan:
+   `npm run testnet:plan -- --purpose deploy --stage executor --address <sender>`.
+   Each deployment stage is **exactly one transaction**, not the execution batch;
+   stage 2 (test-only counter) is planned only after the stage-1 record verifies
+   on-chain, with its own fresh approval. For a deployed executor use `--purpose batch --executor <executor>
    --actions <file>`. Show the exact SHA-256 plan hash, sender, network,
    transaction count, nonces, destinations/predicted deployment addresses,
     action outcomes, coupled gas feasibility, maximum value/fee ceiling and expiry.

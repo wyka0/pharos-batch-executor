@@ -6,17 +6,23 @@ Network is fixed to chain **688689**, RPC
 Mainnet and alternate RPCs are rejected. All placeholders below must be replaced
 with reviewed public values; do not paste a signing key.
 
-## 1. Inspect without a key
+## 1. Inspect without a key: one stage per approved plan
+
+Deployment is staged: **each stage is exactly one, separately planned and
+separately approved transaction**. Stage 1 deploys `BatchExecutor`; stage 2 —
+only after stage 1 is durably verified — deploys the test-only counter. Neither
+stage runs automatically; there is no combined plan.
 
 ```bash
 npm run testnet:readiness -- --address <sender>
-npm run testnet:plan -- --purpose deploy --address <sender>
+npm run testnet:plan -- --purpose deploy --stage executor --address <sender>
 ```
 
-The deployment plan contains **two setup transactions**: BatchExecutor and the
-test-only counter. Predicted addresses are not proof of deployment. Inspect the
-public JSON, cost ceiling, exact nonces, expiration and printed approval hash.
-Stop for explicit approval of that exact plan. “Continue” is not consent.
+The stage-1 plan contains **one** deployment transaction: the executor creation
+from fresh chain observations (chain, pending nonce, gas price, balances, code).
+Predicted addresses are not proof of deployment. Inspect the public JSON, cost
+ceiling, exact nonce, expiration, payload hash and printed approval hash. Stop
+for explicit approval of that exact plan. "Continue" is not consent.
 
 The executor constructor authorizes the **immediate deployer**. The packaged
 deployment transaction is sent directly by the reviewed wallet, giving that
@@ -26,12 +32,28 @@ receipt block. Old permissionless deployments and another wallet's executor are
 not compatible substitutes. Do not deploy through a factory/forwarder and assume
 the wallet is the constructor caller.
 
-## 2. Broadcast only the approved plan
-
-Only after consent, use an existing local signing file **outside the repository**:
+After stage 1 is broadcast and confirmed, re-plan stage 2 — this is deliberate
+freshness, not ceremony. It rebuilds every observation and derives the counter's
+CREATE address from the **actual current nonce**, and binds the verified stage-1
+record (plan hash, transaction hash, block, runtime code hash) as a prerequisite:
 
 ```bash
-npm run testnet:run -- --plan <plan.json> --approve-plan <exact-sha256-hash> --confirm-atlantic-testnet --env-file <external-local-file>
+npm run testnet:plan -- --purpose deploy --stage counter --address <sender>
+```
+
+Trying to plan stage 2 before the stage-1 record exists, or replaying stage 1
+after a record/intent is durable, is refused. A stage-1 approval never authorizes
+stage 2: the approval hash covers the whole plan including its stage selection
+and prerequisites, so it cannot be replayed across stages.
+
+## 2. Broadcast only the approved stage plan
+
+Only after consent, use an existing local signing file **outside the repository**.
+
+The runner takes the plan payload hash as the exact approval:
+
+```bash
+npm run testnet:run -- --plan <stage-plan.json> --approve-plan <exact-sha256-hash> --confirm-atlantic-testnet --env-file <external-local-file>
 ```
 
 The file has a locally configured `PRIVATE_KEY` and optionally `RPC_URL`; neither
@@ -49,16 +71,22 @@ blocks reuse. A submission made before expiry may be confirmed afterward.
 
 Re-planning needs fresh consent and an unencumbered nonce; it cannot automatically
 reuse an aborted or uncertain intent. Deployment approval does not authorize a
-subsequent batch or individual baseline, and a new hash alone does not clear an
-existing marker.
+subsequent stage, batch or individual baseline, and a new hash alone does not
+clear an existing marker. Each stage, batch and baseline lives under its own
+plan hash in the shared state directory; a completed stage's record unlocks the
+next stage's planning, nothing else.
 
-Public execution state lives under `state/testnet/`: fsynced journal, sender lock,
-immutable sender/nonce intents, current execution JSON and immutable snapshots.
+Public execution state lives under `state/testnet/`: fsynced journal, sender
+lock, immutable sender/nonce intents, per-stage deployment claims and verified
+records, approval consumption records, and current execution JSON snapshots.
 Do not remove them or choose a different state directory to bypass an intent.
 
 ## 3. Prepare one execution batch
 
-After both deployment receipts/runtime hashes and the executor caller are verified:
+Batch planning requires **both deployment records to verify fresh** (executor
+source-bound runtime, current code, `authorizedCaller()`, and the counter bound
+to the exact stage-1 record). Missing, changed or stale prerequisite bindings
+refuse the plan before any signature:
 
 ```bash
 npm run actions:demo -- --target <test-only-counter> --scenario mixed --out state/mixed-actions.json

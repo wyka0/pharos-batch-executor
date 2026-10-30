@@ -11,7 +11,7 @@ import { resultsFromReceipt, verifyActionEvents, verifyReceipt, verifyTransactio
 import type { ActionResult, BatchExecutionResult, ComparisonBinding, IndividualExecutionResult, ValidatedAction } from '../types.js';
 import type { BatchGasEstimates, ChainAdapter } from './types.js';
 
-export interface CallRequest { account: Address; to: Address; data: Hex; value: bigint; gas?: bigint; blockNumber?: bigint }
+export interface CallRequest { account: Address; to: Address; data: Hex; value: bigint; gas?: bigint; gasPrice?: bigint; nonce?: number; type?: 'legacy'; blockNumber?: bigint }
 export interface EvmPublicClient {
   getChainId(): Promise<number>;
   getBlockNumber(): Promise<bigint>;

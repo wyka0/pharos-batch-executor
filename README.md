@@ -35,10 +35,11 @@ Deployment would amortize after roughly **20 similar batches only if** the old
 38,032-gas execution saving persisted. [Full accounting and strict comparison
 requirements](docs/evidence.md); revised-contract gas remains unmeasured.
 
-The saved local demonstration submitted **14** transactions: two setup deployments,
-six individual baseline transactions, five one-transaction scenario batches,
-and one refund withdrawal. Setup/baseline/withdrawal costs are not hidden inside
-the one-batch execution count.
+The saved local demonstration contains 14 observed local submissions: two setup
+deployments, six baseline writes, five scenario batches, and one refund
+withdrawal. These are historical local-chain observations, not Atlantic
+execution evidence. Setup/baseline/withdrawal costs are not hidden inside the
+one-batch execution count.
 
 ## Arena requirements
 
@@ -121,7 +122,8 @@ or prove business postconditions.
 npm run cli -- plan --actions <actions.json>
 npm run testnet:readiness -- --address <public-sender>
 npm run cli -- simulate --actions <actions.json> --sender <public-sender> --executor <deployed-executor>
-npm run testnet:plan -- --purpose deploy --address <public-sender>
+npm run testnet:plan -- --purpose deploy --stage executor --address <public-sender>
+npm run testnet:plan -- --purpose deploy --stage counter --address <public-sender> # only after stage 1 verifies on-chain
 npm run testnet:plan -- --purpose batch --address <public-sender> --executor <deployed-executor> --actions <actions.json>
 npm run testnet:status -- --plan <public-plan.json>
 ```

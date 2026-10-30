@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { stringifyPublicJson } from '../src/evidence.js';
@@ -8,6 +7,8 @@ import { broadcastPlanHash, verifyApproval, type BroadcastPlan } from '../src/te
 import { ExecutionJournal } from '../src/testnet/journal.js';
 import { atlanticPublicClient } from '../src/testnet/readiness.js';
 import { executeApprovedPlan } from '../src/testnet/runner.js';
+import { DeploymentStore } from '../src/testnet/deployments.js';
+import { readPublicJson } from '../src/testnet/public-files.js';
 
 async function main() {
   const { values } = parseArgs({ strict: true, options: {
@@ -17,8 +18,7 @@ async function main() {
   if (!values.plan || !values['approve-plan'] || !values['confirm-atlantic-testnet'] || !values['env-file']) {
     throw new Error('Broadcast refused: explicit plan file, exact approval hash, --confirm-atlantic-testnet, and local --env-file are all required.');
   }
-  if ((await stat(values.plan)).size > 1_000_000) throw new Error('Plan file exceeds size limit.');
-  const plan = JSON.parse(await readFile(values.plan, 'utf8')) as BroadcastPlan;
+  const plan = await readPublicJson(values.plan) as BroadcastPlan;
   verifyApproval(plan, values['approve-plan'], values['confirm-atlantic-testnet']);
   const hash = broadcastPlanHash(plan);
   const stateDir = path.resolve(values['state-dir']!);
@@ -26,7 +26,7 @@ async function main() {
   const runId = randomUUID();
   let snapshotIndex = 0;
   const result = await executeApprovedPlan(plan, values['approve-plan'], values['confirm-atlantic-testnet'], {
-    client: atlanticPublicClient(), journal: new ExecutionJournal(stateDir, hash),
+    client: atlanticPublicClient(), journal: new ExecutionJournal(stateDir, hash), deployments: new DeploymentStore(stateDir),
     signerLoader: async () => {
       const { loadLocalSigner } = await import('../src/testnet/signer.js');
       return loadLocalSigner(values['env-file']!, plan.sender);
@@ -37,7 +37,7 @@ async function main() {
     },
   });
   console.log(stringifyPublicJson({ state: result.state, planHash: hash, evidenceFile,
-    steps: result.steps.map((s) => ({ id: s.id, state: s.state, hash: s.transactionHash, receipt: s.receipt, actions: s.actions, error: s.error })),
+    steps: result.steps.map((s) => ({ id: s.id, state: s.state, hash: s.transactionHash, receipt: s.receipt, fees: s.fees, deploymentRecord: s.deploymentRecord, actions: s.actions, error: s.error })),
     comparison: result.comparison }));
   if (result.state !== 'CONFIRMED') process.exitCode = 1;
 }

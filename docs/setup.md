@@ -23,7 +23,8 @@ npm ci
 npm run verify
 ```
 
-Contract builds download solc only when it is absent from Foundry's cache.
+Contract builds run `forge build --offline`; solc comes only from the local
+Foundry cache and is never fetched during offline verification.
 Unit tests prohibit HTTP `fetch`; they use mocked RPC and fresh in-memory
 test-only keys/signatures, never existing real-wallet configuration. Foundry
 creates contracts only inside its in-process test EVM. `verify` does not start
@@ -63,7 +64,7 @@ Do not install signing configuration into the repository. See
 | `npm run build` | Production JS/declarations in `dist/` |
 | `node dist/cli.js --help` | Production CLI smoke test |
 | `npm run testnet:readiness -- --address <sender>` | Public read-only Atlantic observation |
-| `npm run testnet:plan -- ...` | Unsigned public approval plan; no signer |
+| `npm run testnet:plan -- ...` | Unsigned public approval plan; deployments are one stage per plan (`--stage executor` then, after stage 1 verifies, `--stage counter`); no signer |
 | `npm run testnet:run -- ...` | Explicitly gated live TESTNET path only |
 | `npm run testnet:status -- --plan <plan>` | Read-only reconciliation; never sends or clears state |
 

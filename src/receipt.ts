@@ -59,6 +59,9 @@ export interface TransactionLike {
   value: bigint;
   chainId?: number;
   nonce: number;
+  type?: string;
+  gas?: bigint;
+  gasPrice?: bigint;
   blockNumber?: bigint | null;
   blockHash?: Hash | null;
   transactionIndex?: number | null;
