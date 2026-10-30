@@ -12,6 +12,7 @@ import {
 import { afterEach, describe, expect, it, vi, type Mock } from 'vitest';
 import { loadArtifact, type ContractArtifact } from '../src/artifacts.js';
 import { BATCH_EXECUTOR_ABI } from '../src/abi.js';
+import { minimumBatchTransactionGas } from '../src/limits.js';
 import { scanTextForSecrets } from '../src/safety.js';
 import { validateActions } from '../src/validation.js';
 import { buildBroadcastPlan } from '../src/testnet/build-plan.js';
@@ -66,6 +67,8 @@ interface SimulatedChain {
   setOutcomePattern(pattern: readonly boolean[]): void;
   setBatch(actions: readonly ValidatedAction[]): void;
   setExecutor(address: Address): void;
+  setBalance(balance: bigint): void;
+  setBlockGasLimit(gasLimit: bigint): void;
   behavior: { sendFails: boolean; receiptWaitFails: boolean };
 }
 
@@ -82,6 +85,8 @@ function simulateChain(sender: Address, runtimeCode: Map<Hex, ContractArtifact>)
   let executor: Address | undefined;
   let pendingBatch: readonly ValidatedAction[] = [];
   let outcomePattern: readonly boolean[] = [true, true, true];
+  let balance = 1_000_000_000_000_000_000n;
+  let blockGasLimit = 30_000_000n;
   const behavior = { sendFails: false, receiptWaitFails: false };
   const blockHash = (number: bigint): Hash => keccak256(toHex(number));
 
@@ -125,16 +130,18 @@ function simulateChain(sender: Address, runtimeCode: Map<Hex, ContractArtifact>)
     getBlock: vi.fn(async ({ blockNumber }: { blockNumber: bigint }) => {
       if (blockNumber <= 0n || blockNumber > latest) throw new Error('simulated missing block');
       const txCount = blockTxCounts.get(blockNumber);
-      return { hash: blockHash(blockNumber), gasLimit: 30_000_000n, parentHash: blockHash(blockNumber - 1n),
+      return { hash: blockHash(blockNumber), gasLimit: blockGasLimit, parentHash: blockHash(blockNumber - 1n),
         ...(txCount === undefined ? {} : { transactions: new Array(txCount).fill({}) }) };
     }),
-    getBalance: vi.fn(async () => 1_000_000_000_000_000_000n),
+    getBalance: vi.fn(async () => balance),
     getGasPrice: vi.fn(async () => 10_000_000_000n),
     getTransactionCount: vi.fn(async ({ address }: { address: Address }) =>
       address.toLowerCase() === sender.toLowerCase() ? senderNonce : accountNonces.get(address) ?? 0),
     getCode: vi.fn(async ({ address }: { address: Address }) => code.get(address) ?? '0x'),
     estimateGas: vi.fn(async ({ to, gas }: { to?: Address; gas?: bigint }) => {
-      const estimate = to === undefined ? 100_000n : to.toLowerCase() === executor?.toLowerCase() ? 700_000n : 30_000n;
+      const estimate = to === undefined ? 100_000n : to.toLowerCase() === executor?.toLowerCase()
+        ? outcomePattern.some((success) => !success) ? 143_258n : 171_832n
+        : 30_000n;
       if (estimate > (gas ?? 5_000_000n)) throw new Error('simulated gas overflow');
       return estimate;
     }),
@@ -166,6 +173,8 @@ function simulateChain(sender: Address, runtimeCode: Map<Hex, ContractArtifact>)
     setOutcomePattern: (pattern) => { outcomePattern = pattern; },
     setBatch: (actions) => { pendingBatch = actions; },
     setExecutor: (address) => { executor = address; },
+    setBalance: (next) => { balance = next; },
+    setBlockGasLimit: (next) => { blockGasLimit = next; },
   };
 }
 
@@ -322,6 +331,9 @@ describe('staged, separately approved deployments (offline simulation only)', ()
     expect(success.actions).toHaveLength(3);
     expect(success.transactions).toHaveLength(1);
     expect(success.transactions[0]!.nonce).toBe(5);
+    const successActions = validateActions(success.actions);
+    expect(BigInt(success.transactions[0]!.gasLimit)).toBe((minimumBatchTransactionGas(successActions, success.transactions[0]!.data) * 12_000n + 9_999n) / 10_000n);
+    expect(BigInt(success.transactions[0]!.gasLimit)).toBeGreaterThan((171_832n * 12_000n + 9_999n) / 10_000n);
     expect(success.actions!.every((action) => action.target.toLowerCase() === counterAddress.toLowerCase())).toBe(true);
     verifyApproval(success, broadcastPlanHash(success), true, h.now());
     h.chain.setBatch(validateActions(success.actions));
@@ -338,6 +350,9 @@ describe('staged, separately approved deployments (offline simulation only)', ()
     h.chain.setOutcomePattern([true, false, true]);
     const mixed = await h.plan({ purpose: 'batch', scenario: 'mixed' });
     expect(mixed.transactions[0]!.nonce).toBe(6); // the successful batch advanced the observed nonce
+    const mixedActions = validateActions(mixed.actions);
+    expect(BigInt(mixed.transactions[0]!.gasLimit)).toBe((minimumBatchTransactionGas(mixedActions, mixed.transactions[0]!.data) * 12_000n + 9_999n) / 10_000n);
+    expect(BigInt(mixed.transactions[0]!.gasLimit)).toBeGreaterThan((143_258n * 12_000n + 9_999n) / 10_000n);
     verifyApproval(mixed, broadcastPlanHash(mixed), true, h.now());
     h.chain.setBatch(validateActions(mixed.actions));
     h.chain.setOutcomePattern([true, false, true]);
@@ -351,6 +366,22 @@ describe('staged, separately approved deployments (offline simulation only)', ()
     // a batch cannot be replayed under another plan's approval
     const replay = h.run(mixed);
     await expect(executeApprovedPlan(mixed, successRun.hash, true, replay.deps)).rejects.toThrow(/plan-hash/);
+  });
+
+  it('refuses a conservatively bounded batch above the current block gas limit', async () => {
+    const h = await harness();
+    await deployStage(h, 'executor');
+    await deployStage(h, 'counter');
+    h.chain.setBlockGasLimit(573_000n);
+    await expect(h.plan({ purpose: 'batch', scenario: 'success' })).rejects.toThrow(/block gas limit/);
+  });
+
+  it('refuses a valid conservative batch bound when balance cannot cover its maximum cost', async () => {
+    const h = await harness();
+    await deployStage(h, 'executor');
+    await deployStage(h, 'counter');
+    h.chain.setBalance(1n);
+    await expect(h.plan({ purpose: 'batch', scenario: 'success' })).rejects.toThrow(/Insufficient balance/);
   });
 
   it('an uncertain submission reconciles to a recovered durable record without resending', async () => {

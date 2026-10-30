@@ -3,9 +3,10 @@ import { EvmAdapter } from '../adapters/evm.js';
 import { loadArtifact } from '../artifacts.js';
 import { makeDemoActions } from '../demo-actions.js';
 import { ExecutionGateError } from '../errors.js';
+import { minimumBatchTransactionGas } from '../limits.js';
 import { ATLANTIC } from '../network.js';
 import { preparePlan } from '../plan.js';
-import type { BatchActionInput } from '../types.js';
+import type { BatchActionInput, ValidatedAction } from '../types.js';
 import { validateActions } from '../validation.js';
 import { broadcastPlanHash, DEPLOYMENT_ARTIFACTS, MAX_TRANSACTION_GAS, PLAN_TTL_MS, transactionPayloadHash, verifyApproval, type BroadcastPlan, type DeploymentStage, type PlannedTransaction } from './broadcast-plan.js';
 import type { DeploymentStore } from './deployments.js';
@@ -102,9 +103,11 @@ export async function buildBroadcastPlan(options: {
         ...(estimate.error === undefined ? {} : { error: estimate.error }) })),
     };
     if (options.purpose === 'batch') {
+      const gasLimit = plannedBatchGasLimit(estimates.batch.gas, actions, prepared.batchCalldata);
+      if (gasLimit > MAX_TRANSACTION_GAS) throw new ExecutionGateError('Safe batch gas bound exceeds the unchanged runner ceiling.');
       transactions.push({ id: 'execute-batch', kind: 'batch', nonce: pendingNonce, to: executor,
         data: prepared.batchCalldata, valueWei: prepared.totalValue.toString(),
-        estimatedGas: estimates.batch.gas.toString(), gasLimit: margin(estimates.batch.gas).toString() });
+        estimatedGas: estimates.batch.gas.toString(), gasLimit: gasLimit.toString() });
     } else {
       if (estimates.individualTotal === null || simulation.actions.some((a) => !a.success)) throw new ExecutionGateError('Refusing individual baseline with failing action estimates or simulation.');
       for (const [i, action] of actions.entries()) transactions.push({ id: action.id, kind: 'individual', nonce: pendingNonce + i,
@@ -129,3 +132,14 @@ export async function buildBroadcastPlan(options: {
 }
 
 function margin(gas: bigint): bigint { return (gas * 12_000n + 9_999n) / 10_000n; }
+
+export function plannedBatchGasLimit(
+  estimatedGas: bigint, actions: readonly Pick<ValidatedAction, 'gasLimit'>[], calldata: `0x${string}`,
+): bigint {
+  const estimatedWithMargin = margin(estimatedGas);
+  // The shared helper is a necessary lower bound; it deliberately excludes
+  // validation/dispatch overhead consumed before Solidity's gasleft() check.
+  // Apply the same unchanged safety margin to both candidate bounds.
+  const conservativeMinimum = margin(minimumBatchTransactionGas(actions, calldata));
+  return estimatedWithMargin > conservativeMinimum ? estimatedWithMargin : conservativeMinimum;
+}

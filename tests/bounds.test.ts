@@ -1,12 +1,16 @@
 /** Pure unsigned-plan bounds. SYNTHETIC estimates, no RPC or signer. */
-import { keccak256 } from 'viem';
+import { encodeAbiParameters, keccak256, type Address } from 'viem';
 import { describe, expect, it } from 'vitest';
-import { minimumBatchTransactionGas, requiredExecutionGas } from '../src/limits.js';
+import { makeDemoActions } from '../src/demo-actions.js';
+import { minimumBatchTransactionGas, requiredExecutionGas, UINT256_MAX } from '../src/limits.js';
 import { preparePlan } from '../src/plan.js';
+import { plannedBatchGasLimit } from '../src/testnet/build-plan.js';
 import { broadcastPlanHash, MAX_TRANSACTION_GAS, transactionPayloadHash, verifyApproval, type BroadcastPlan } from '../src/testnet/broadcast-plan.js';
 import { validateActions } from '../src/validation.js';
-import { batchPlan } from './broadcast-fixtures.js';
+import { batchPlan, sealPayloads } from './broadcast-fixtures.js';
 import { threeActions } from './fixtures.js';
+
+const ATLANTIC_COUNTER = '0xD54115B2c5698AAf468aa3d6623A3Dc3A650b47E' as Address;
 
 /** Re-stamp the complete payload hash after synthetic mutation of the plan. */
 function reseal(plan: BroadcastPlan): void {
@@ -63,5 +67,72 @@ describe('coupled action count and runner gas bounds', () => {
     plan.maximumCostWei = ((minimum - 1n) * BigInt(plan.gasPriceWei)).toString();
     reseal(plan);
     expect(() => verifyApproval(plan, broadcastPlanHash(plan), true)).toThrow(/intrinsic\/calldata gas/);
+  });
+});
+
+describe('conservative batch planner gas selection', () => {
+  it('raises the observed three-action success estimate above the authoritative minimum and passes verifyApproval', () => {
+    const inputs = makeDemoActions(ATLANTIC_COUNTER, 'success', 3, 'success-5');
+    const actions = validateActions(inputs);
+    const prepared = preparePlan(actions);
+    const minimum = minimumBatchTransactionGas(actions, prepared.batchCalldata);
+    const selected = plannedBatchGasLimit(171_832n, actions, prepared.batchCalldata);
+    expect(requiredExecutionGas(actions)).toBe(544_764n);
+    expect(minimum).toBe(573_392n);
+    expect(selected).toBe(688_071n);
+    expect(selected).toBeGreaterThanOrEqual(minimum);
+    expect(selected).toBeGreaterThan((171_832n * 12_000n + 9_999n) / 10_000n);
+
+    const plan = batchPlan();
+    plan.actions = inputs;
+    plan.targetCodeHashes = { [ATLANTIC_COUNTER]: keccak256('0x00') };
+    plan.expectedSimulation = actions.map((action, i) => ({ id: action.id, success: true,
+      returnData: encodeAbiParameters([{ type: 'uint256' }], [BigInt(i + 10)]), returnDataSize: '32' }));
+    plan.gasEstimates = { blockNumber: '10', batch: '171832', individual: actions.map((action) => ({ id: action.id, gas: '58447' })) };
+    Object.assign(plan.transactions[0]!, { data: prepared.batchCalldata, estimatedGas: '171832', gasLimit: selected.toString() });
+    sealPayloads(plan);
+    expect(() => verifyApproval(plan, broadcastPlanHash(plan), true)).not.toThrow();
+    expect(transactionPayloadHash(plan, plan.transactions[0]!)).toBe(plan.transactions[0]!.payloadHash);
+    expect(broadcastPlanHash(structuredClone(plan))).toBe(broadcastPlanHash(plan));
+  });
+
+  it('raises the observed mixed success/failure/success estimate above its calldata-specific minimum', () => {
+    const actions = validateActions(makeDemoActions(ATLANTIC_COUNTER, 'mixed', 3, 'mixed-5'));
+    const prepared = preparePlan(actions);
+    const selected = plannedBatchGasLimit(143_258n, actions, prepared.batchCalldata);
+    expect(minimumBatchTransactionGas(actions, prepared.batchCalldata)).toBe(572_740n);
+    expect(selected).toBe(687_288n);
+    expect(selected).toBeGreaterThanOrEqual(572_740n);
+    expect(selected).toBeGreaterThan((143_258n * 12_000n + 9_999n) / 10_000n);
+  });
+
+  it('never drops below the configured RPC margin when the estimate dominates', () => {
+    const actions = validateActions(makeDemoActions(ATLANTIC_COUNTER, 'success', 3, 'margin'));
+    const calldata = preparePlan(actions).batchCalldata;
+    expect(plannedBatchGasLimit(1_000_000n, actions, calldata)).toBe(1_200_000n);
+  });
+
+  it('increases for larger per-action caps and larger calldata', () => {
+    const inputs = makeDemoActions(ATLANTIC_COUNTER, 'success', 3, 'growth');
+    const normal = validateActions(inputs);
+    const normalData = preparePlan(normal).batchCalldata;
+    const largerCaps = validateActions(inputs.map((action) => ({ ...action, gasLimit: '200000' })));
+    const largerCapData = preparePlan(largerCaps).batchCalldata;
+    const largerCalldata = validateActions(inputs.map((action) => ({ ...action, calldata: `0x${'ff'.repeat(1_000)}` })));
+    const largerData = preparePlan(largerCalldata).batchCalldata;
+    expect(minimumBatchTransactionGas(largerCaps, largerCapData)).toBeGreaterThan(minimumBatchTransactionGas(normal, normalData));
+    expect(minimumBatchTransactionGas(largerCalldata, largerData)).toBeGreaterThan(minimumBatchTransactionGas(normal, normalData));
+  });
+
+  it('retains the runner ceiling and handles bigint boundaries without arithmetic overflow', () => {
+    const actions = validateActions(makeDemoActions(ATLANTIC_COUNTER, 'success', 32, 'ceiling'));
+    const calldata = preparePlan(actions).batchCalldata;
+    expect(plannedBatchGasLimit(1_000_000n, actions, calldata)).toBeGreaterThan(MAX_TRANSACTION_GAS);
+    expect(plannedBatchGasLimit(UINT256_MAX, actions.slice(0, 3), preparePlan(actions.slice(0, 3)).batchCalldata)).toBeGreaterThan(UINT256_MAX);
+  });
+
+  it('continues to reject empty and oversized action lists before gas planning', () => {
+    expect(() => validateActions([])).toThrow(/at least/);
+    expect(() => validateActions(Array.from({ length: 33 }, (_, i) => ({ ...threeActions()[0]!, id: `invalid-${i}` })))).toThrow(/on-chain limit|at most/);
   });
 });
