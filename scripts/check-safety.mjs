@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { assertPublicData, scanTextForSecrets } from '../dist/safety.js';
+import { isDeprecationTestFile, isExecutableRpcScanTarget, scanText as scanTextForDeprecatedRpcMethods } from './check-rpc-methods.mjs';
 import { root } from './tooling.mjs';
 
 const run = promisify(execFile);
@@ -36,6 +37,26 @@ for (const relative of files) {
   required.delete(relative);
 }
 for (const file of required) findings.push(`${file}: required public file missing`);
+
+// Deprecated public trace RPC methods (disabled on the public Pharos RPC
+// endpoints) must not appear in first-party executable files. Documentation,
+// evidence, the guard module and the dedicated deprecation test suite are the
+// only exemptions; no other file may opt out, by path or inline comment.
+const guardModule = path.resolve(path.join(root, 'scripts', 'check-rpc-methods.mjs'));
+for (const relative of files) {
+  if (!isExecutableRpcScanTarget(relative)) continue;
+  const file = path.join(root, relative);
+  if (path.resolve(file) === guardModule) continue;
+  if (isDeprecationTestFile(relative)) continue;
+  const info = await stat(file).catch(() => null);
+  if (info === null || !info.isFile() || info.size > 5_000_000) continue;
+  const text = await readFile(file, 'utf8');
+  findings.push(
+    ...scanTextForDeprecatedRpcMethods(text).map(
+      (finding) => `${relative}:${finding.line}:${finding.column}: deprecated RPC trace method ${finding.method}`,
+    ),
+  );
+}
 
 // Gitignored secret-bearing material stays out of any published listing.
 const ignoredPublicly = ['.env.local', 'state/x', 'evidence/runs/x', 'dist/x', 'node_modules/x', 'out/x'];
